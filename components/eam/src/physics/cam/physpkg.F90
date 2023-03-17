@@ -56,6 +56,10 @@ module physpkg
   use check_energy,    only: nstep_ignore_diagn1, nstep_ignore_diagn2, &
                              check_energy_gmean, check_energy_gmean_additional_diagn, &
                              print_additional_diagn
+#if defined(CLDERA_PROFILING)
+  use cldera_interface_mod, only: cldera_compute_stats
+  use time_manager,         only: get_curr_date
+#endif
 
   implicit none
   private
@@ -1248,6 +1252,9 @@ subroutine phys_run1_adiabatic_or_ideal(ztodt, phys_state, phys_tend,  pbuf2d)
     real(r8), pointer, dimension(:) :: teout
     logical, SAVE :: first_exec_of_phys_run1_adiabatic_or_ideal  = .TRUE.
     !-----------------------------------------------------------------------
+#if defined(CLDERA_PROFILING)
+    integer :: ymd, yr, mon, day, tod
+#endif
 
     nstep = get_nstep()
     zero  = 0._r8
@@ -1260,6 +1267,16 @@ subroutine phys_run1_adiabatic_or_ideal(ztodt, phys_state, phys_tend,  pbuf2d)
     call system_clock(count=beg_proc_cnt)
 
     call phys_getopts(ideal_phys_option_out=ideal_phys_option)
+
+#if defined(CLDERA_PROFILING)
+   ! Compute stats here, since the first thing that happens in the loop below
+   ! (other than initing tendencies to 0) is the writing of physics state to file
+   call get_curr_date( yr, mon, day, tod)
+   ymd = yr*10000 + mon*100 + day
+   call t_startf('cldera_compute_stats')
+   call cldera_compute_stats(ymd,tod)
+   call t_stopf('cldera_compute_stats')
+#endif
 
 !$OMP PARALLEL DO SCHEDULE(STATIC,1) &
 !$OMP PRIVATE (c, beg_chnk_cnt, flx_heat, end_chnk_cnt, sysclock_rate, sysclock_max, chunk_cost)
@@ -2380,6 +2397,9 @@ subroutine tphysbc (ztodt,               &
     logical :: l_st_mic
     logical :: l_rad
     !HuiWan (2014/15): added for a short-term time step convergence test ==
+#if defined(CLDERA_PROFILING)
+    integer :: ymd, yr, mon, day, tod
+#endif
 
     ! Numerical schemes for process coupling
     integer :: cflx_cpl_opt  ! When to apply surface tracer fluxes  (not including water vapor).
@@ -3028,6 +3048,16 @@ end if
     ! Moist physical parameteriztions complete: 
     ! send dynamical variables, and derived variables to history file
     !===================================================
+#if defined(CLDERA_PROFILING)
+   ! Compute stats here, so that we get the same values for phys state var as
+   ! we would get in the EAM history file, right below
+   call get_curr_date( yr, mon, day, tod)
+   ymd = yr*10000 + mon*100 + day
+   call t_startf('cldera_compute_stats')
+   call cldera_compute_stats(ymd,tod)
+   call t_stopf('cldera_compute_stats')
+#endif
+
 
     call t_startf('bc_history_write')
     call diag_phys_writeout(state, cam_out%psl)
