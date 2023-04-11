@@ -325,6 +325,12 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    call cldera_add_partitioned_field("psdry",1,dims,dimnames,nparts,part_dim)
    call cldera_add_partitioned_field("phis",1,dims,dimnames,nparts,part_dim)
 
+   ! Last arg is view=false, since AOD fields are *not* views of EAM persistent data.
+   call cldera_add_partitioned_field("aod"    , 1,dims,dimnames,nparts,part_dim,.false.)
+   call cldera_add_partitioned_field("aod_so2", 1,dims,dimnames,nparts,part_dim,.false.)
+   call cldera_add_partitioned_field("aod_ash", 1,dims,dimnames,nparts,part_dim,.false.)
+   call cldera_add_partitioned_field("aod_sulf",1,dims,dimnames,nparts,part_dim,.false.)
+
    !2d, mid points
    dims(2) = pver
    dimnames(2) = 'lev'
@@ -340,12 +346,15 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    call cldera_add_partitioned_field("exner",2,dims,dimnames,nparts,part_dim)
    call cldera_add_partitioned_field("zm",2,dims,dimnames,nparts,part_dim)
 
+<<<<<<< HEAD
    ! Last arg is view=false, since AOD fields are *not* views of EAM persistent data.
    call cldera_add_partitioned_field("aod_tot", 2,dims,dimnames,nparts,part_dim,.false.)
    call cldera_add_partitioned_field("aod_so2", 2,dims,dimnames,nparts,part_dim,.false.)
    call cldera_add_partitioned_field("aod_ash", 2,dims,dimnames,nparts,part_dim,.false.)
    call cldera_add_partitioned_field("aod_sulf",2,dims,dimnames,nparts,part_dim,.false.)
 
+=======
+>>>>>>> 4cb1c39b8e (Merge pull request #43 from sandialabs/bartgol/fix-aod-cldera-field-rank)
    ! 2d, interfaces
    dims(2) = pver+1
    dimnames(2) = "ilev"
