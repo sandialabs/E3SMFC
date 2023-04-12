@@ -482,6 +482,11 @@ contains
          long_name='landunit weight relative to corresponding topounit', units='',         &
          interpinic_flag='skip', readvar=readvar, data=lun_pp%wttopounit)
 
+    call restartvar(ncid=ncid, flag=flag, varname='land1d_wttopounit', xtype=ncd_double, &
+         dim1name='landunit',                                                            &
+         long_name='landunit weight relative to corresponding topounit', units='',       &
+         interpinic_flag='skip', readvar=readvar, data=lun_pp%wttopounit)
+
     call restartvar(ncid=ncid, flag=flag, varname='cols1d_wtxy', xtype=ncd_double,  &
          dim1name='column',                                                         &
          long_name='column weight relative to corresponding gridcell', units=' ',   &
@@ -499,6 +504,11 @@ contains
     
     call restartvar(ncid=ncid, flag=flag, varname='cols1d_wttopounit', xtype=ncd_double, &
          dim1name='column',                                                            &
+         long_name='column weight relative to corresponding topounit', units='',         &
+         interpinic_flag='skip', readvar=readvar, data=col_pp%wttopounit)
+
+    call restartvar(ncid=ncid, flag=flag, varname='cols1d_wttopounit', xtype=ncd_double, &
+         dim1name='column',                                                              &
          long_name='column weight relative to corresponding topounit', units='',         &
          interpinic_flag='skip', readvar=readvar, data=col_pp%wttopounit)
 
