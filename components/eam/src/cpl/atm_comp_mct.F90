@@ -181,6 +181,8 @@ CONTAINS
     integer :: tod              ! CAM current time of day (sec)
     integer :: start_ymd        ! Start date (YYYYMMDD)
     integer :: start_tod        ! Start time of day (sec)
+    integer :: curr_ymd         ! Current date (YYYYMMDD)
+    integer :: curr_tod         ! Current time of day (sec)
     integer :: ref_ymd          ! Reference date (YYYYMMDD)
     integer :: ref_tod          ! Reference time of day (sec)
     integer :: stop_ymd         ! Stop date (YYYYMMDD)
@@ -338,6 +340,7 @@ CONTAINS
        call seq_timemgr_EClockGetData(EClock, &
             start_ymd=start_ymd, start_tod=start_tod, &
             ref_ymd=ref_ymd, ref_tod=ref_tod,         &
+            curr_ymd=curr_ymd, curr_tod=curr_tod,         &
             stop_ymd=stop_ymd, stop_tod=stop_tod,     &
             calendar=calendar )
        !
@@ -365,7 +368,7 @@ CONTAINS
        ! we'll try to register stuff in cldera, and if cldera is not inited,
        ! all registration calls will return immediately
        call t_startf('cldera_init')
-       call cldera_init(mpicom_atm,start_ymd,start_tod,stop_ymd,stop_tod)
+       call cldera_init(mpicom_atm,start_ymd,start_tod,curr_ymd,curr_tod,stop_ymd,stop_tod)
        call cldera_set_log_unit (iulog)
        call cldera_set_masterproc (masterproc)
        call t_stopf('cldera_init')
@@ -585,6 +588,7 @@ CONTAINS
     use pmgrid,          only: plev, plevp
     use constituents,    only: pcnst
     use shr_sys_mod,     only: shr_sys_flush
+    use physpkg,         only: is_atm_init
 
     ! 
     ! Arguments
@@ -634,6 +638,7 @@ CONTAINS
     character(CXX) ::tagname, mct_field, modelStr
 #endif 
 
+    is_atm_init = .false.
 #if (defined _MEMTRACE)
     if(masterproc) then
       lbnum=1
