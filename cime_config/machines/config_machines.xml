@@ -1047,8 +1047,6 @@
         <command name="load">git/2.36.1</command>
         <command name="load">cmake/3.21.3</command>
         <command name="load">zlib/1.2.11</command>
-        <command name="load">cray-hdf5-parallel/1.12.2.1</command>
-        <command name="load">cray-netcdf-hdf5parallel/4.9.0.1</command>
         <command name="load">cray-parallel-netcdf/1.12.3.1</command>
       </modules>
     </module_system>
@@ -1058,10 +1056,16 @@
     <TEST_MEMLEAK_TOLERANCE>0.25</TEST_MEMLEAK_TOLERANCE>
     <MAX_GB_OLD_TEST_DATA>0</MAX_GB_OLD_TEST_DATA>
     <environment_variables>
-      <env name="NETCDF_PATH">$ENV{NETCDF_DIR}</env>
       <env name="PNETCDF_PATH">$ENV{PNETCDF_DIR}</env>
       <env name="NTASKS_PER_GPU"> </env>
       <env name="GPU_BIND_ARGS"> </env>
+    </environment_variables>
+    <environment_variables compiler="gnu">
+      <env name="NETCDF_PATH">/ccs/home/wuda/NETCDF</env>
+      <env name="HDF5_ROOT">/ccs/home/wuda/HDF5</env>
+      <env name="HDF5_PLUGIN_PATH">/ccs/home/wuda/Log_IO_VOL/lib</env>
+      <env name="HDF5_VOL_CONNECTOR">LOG under_vol=0;under_info={}</env>
+      <env name="LD_LIBRARY_PATH">/ccs/home/wuda/HDF5/lib:/ccs/home/wuda/Log_IO_VOL/lib:/ccs/home/wuda/NETCDF/lib:$ENV{LD_LIBRARY_PATH}</env>
     </environment_variables>
     <environment_variables compiler="amdclang">
       <env name="LD_LIBRARY_PATH">$ENV{CRAY_LIBSCI_DIR}/amd/4.0/x86_64/lib:$ENV{LD_LIBRARY_PATH}</env>
