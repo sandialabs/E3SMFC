@@ -48,6 +48,10 @@ else()
     set(USE_YAKL FALSE)
 endif()
 
+# Detect if CLDERA profiling tool lib has to be used
+string(FIND "${CAM_CONFIG_OPTS}" "-cldera_profiling" USE_CLDERA_PROFILING)
+
+
 #===============================================================================
 # set CPP options (must use this before any flags or cflags settings)
 #===============================================================================
