@@ -140,6 +140,9 @@ CONTAINS
 !================================================================================
 
   subroutine atm_init_mct( EClock, cdata_a, x2a_a, a2x_a, NLFilename )
+#if defined(CLDERA_PROFILING)
+    use cldera_interface_mod, only: cldera_init, cldera_set_log_unit, cldera_set_masterproc
+#endif
 
     !-----------------------------------------------------------------------
     !
@@ -178,6 +181,8 @@ CONTAINS
     integer :: tod              ! CAM current time of day (sec)
     integer :: start_ymd        ! Start date (YYYYMMDD)
     integer :: start_tod        ! Start time of day (sec)
+    integer :: curr_ymd         ! Current date (YYYYMMDD)
+    integer :: curr_tod         ! Current time of day (sec)
     integer :: ref_ymd          ! Reference date (YYYYMMDD)
     integer :: ref_tod          ! Reference time of day (sec)
     integer :: stop_ymd         ! Stop date (YYYYMMDD)
@@ -224,7 +229,7 @@ CONTAINS
 #endif 
 
     if (first_time) then
-       
+
        call cam_instance_init(ATMID)
 
        ! Set filename specifier for restart surface file
@@ -335,6 +340,7 @@ CONTAINS
        call seq_timemgr_EClockGetData(EClock, &
             start_ymd=start_ymd, start_tod=start_tod, &
             ref_ymd=ref_ymd, ref_tod=ref_tod,         &
+            curr_ymd=curr_ymd, curr_tod=curr_tod,         &
             stop_ymd=stop_ymd, stop_tod=stop_tod,     &
             calendar=calendar )
        !
@@ -356,6 +362,18 @@ CONTAINS
                perpetual_run=perpetual_run,               &
                perpetual_ymd=perpetual_ymd )
        end if
+
+#if defined(CLDERA_PROFILING)
+       ! Initialize CLDERA profiling *before* cam_init, since that's when
+       ! we'll try to register stuff in cldera, and if cldera is not inited,
+       ! all registration calls will return immediately
+       call t_startf('cldera_init')
+       call cldera_init(mpicom_atm,start_ymd,start_tod,curr_ymd,curr_tod,stop_ymd,stop_tod)
+       call cldera_set_log_unit (iulog)
+       call cldera_set_masterproc (masterproc)
+       call t_stopf('cldera_init')
+#endif
+
        !
        ! First phase of cam initialization 
        ! Initialize mpicom_atm, allocate cam_in and cam_out and determine 
@@ -570,6 +588,7 @@ CONTAINS
     use pmgrid,          only: plev, plevp
     use constituents,    only: pcnst
     use shr_sys_mod,     only: shr_sys_flush
+    use physpkg,         only: is_atm_init
 
     ! 
     ! Arguments
@@ -619,6 +638,7 @@ CONTAINS
     character(CXX) ::tagname, mct_field, modelStr
 #endif 
 
+    is_atm_init = .false.
 #if (defined _MEMTRACE)
     if(masterproc) then
       lbnum=1
@@ -805,6 +825,9 @@ CONTAINS
   !================================================================================
 
   subroutine atm_final_mct( EClock, cdata_a, x2a_a, a2x_a)
+#if defined(CLDERA_PROFILING)
+    use cldera_interface_mod, only: cldera_clean_up
+#endif
 
     type(ESMF_Clock)            ,intent(inout) :: EClock
     type(seq_cdata)             ,intent(inout) :: cdata_a
@@ -814,6 +837,12 @@ CONTAINS
     call t_startf('cam_final')
     call cam_final( cam_out, cam_in )
     call t_stopf('cam_final')
+
+#if defined(CLDERA_PROFILING)
+    call t_startf('cldera_clean_up')
+    call cldera_clean_up ()
+    call t_stopf('cldera_clean_up')
+#endif
 
   end subroutine atm_final_mct
 

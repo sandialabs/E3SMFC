@@ -56,12 +56,18 @@ module physpkg
   use check_energy,    only: nstep_ignore_diagn1, nstep_ignore_diagn2, &
                              check_energy_gmean, check_energy_gmean_additional_diagn, &
                              print_additional_diagn
+#if defined(CLDERA_PROFILING)
+  use cldera_interface_mod, only: cldera_compute_stats
+  use time_manager,         only: get_prev_date
+#endif
 
   implicit none
   private
 
   !  Physics buffer index
   integer ::  teout_idx          = 0  
+  logical, public :: is_atm_init = .true.
+  logical :: first_time_step     = .true.
 
   integer ::  tini_idx           = 0 
   integer ::  qini_idx           = 0 
@@ -1048,6 +1054,9 @@ subroutine phys_run1(phys_state, ztodt, phys_tend, pbuf2d,  cam_in, cam_out, phy
 #if ( defined OFFLINE_DYN )
      use metdata,       only: get_met_srf1
 #endif
+#if defined(CLDERA_PROFILING)
+    use cam_control_mod,    only: nsrest  ! restart flag
+#endif
 
     !
     ! Input arguments
@@ -1081,6 +1090,9 @@ subroutine phys_run1(phys_state, ztodt, phys_tend, pbuf2d,  cam_in, cam_out, phy
     integer(i8) :: sysclock_max                  ! system clock max value
     real(r8)    :: chunk_cost                    ! measured cost per chunk
     type(physics_buffer_desc), pointer :: phys_buffer_chunk(:)
+#if defined(CLDERA_PROFILING)
+    integer :: ymd, yr, mon, day, tod            ! components of a date
+#endif
 
     logical     :: print_additional_diagn_local
 
@@ -1183,6 +1195,31 @@ subroutine phys_run1(phys_state, ztodt, phys_tend, pbuf2d,  cam_in, cam_out, phy
        !call t_adj_detailf(-1)
        call t_stopf ('bc_physics')
 
+#if defined(CLDERA_PROFILING)
+      ! Note: we need to compute stats *after* EAM has completed the physics calculations above
+      ! The tphysbc call will update tendencies (for the BC physics), and call outfld for all
+      ! diags/state vars. So computing stats here should get *the same* values that we get from
+      ! regular EAM output.
+      if (.not. is_atm_init) then
+        if (first_time_step .and. nsrest .eq. 0) then
+          if (masterproc) then
+            print *, "WARNING! You are using a workaround to issue E3SM-Project/e3sm#5904"
+            print *, "         If that issue has been resolved, remove this hack"
+          endif
+          first_time_step = .false.
+        else
+          call get_prev_date( yr, mon, day, tod)
+          ymd = yr*10000 + mon*100 + day
+          call t_startf('cldera_compute_stats')
+          call cldera_compute_stats(ymd,tod)
+          call t_stopf('cldera_compute_stats')
+        endif
+      endif
+#endif
+
+       ! Don't call the rest in CRM mode
+       if(single_column.and.scm_crm_mode) return
+
 #ifdef TRACER_CHECK
        call gmean_mass ('between DRY', phys_state)
 #endif
@@ -1248,6 +1285,9 @@ subroutine phys_run1_adiabatic_or_ideal(ztodt, phys_state, phys_tend,  pbuf2d)
     real(r8), pointer, dimension(:) :: teout
     logical, SAVE :: first_exec_of_phys_run1_adiabatic_or_ideal  = .TRUE.
     !-----------------------------------------------------------------------
+#if defined(CLDERA_PROFILING)
+    integer :: ymd, yr, mon, day, tod
+#endif
 
     nstep = get_nstep()
     zero  = 0._r8
@@ -1260,6 +1300,26 @@ subroutine phys_run1_adiabatic_or_ideal(ztodt, phys_state, phys_tend,  pbuf2d)
     call system_clock(count=beg_proc_cnt)
 
     call phys_getopts(ideal_phys_option_out=ideal_phys_option)
+
+#if defined(CLDERA_PROFILING)
+   ! Compute stats here, since the first thing that happens in the loop below
+   ! (other than initing tendencies to 0) is the writing of physics state to file
+   if (.not. is_atm_init) then
+     if (first_time_step .and. nsrest .eq. 0) then
+       first_time_step = .false.
+       if (masterproc) then
+         print *, "WARNING! You are using a workaround to issue E3SM-Project/e3sm#5904"
+         print *, "         If that issue has been resolved, remove this hack"
+       endif
+     else
+       call get_prev_date( yr, mon, day, tod)
+       ymd = yr*10000 + mon*100 + day
+       call t_startf('cldera_compute_stats')
+       call cldera_compute_stats(ymd,tod)
+       call t_stopf('cldera_compute_stats')
+     endif
+   endif
+#endif
 
 !$OMP PARALLEL DO SCHEDULE(STATIC,1) &
 !$OMP PRIVATE (c, beg_chnk_cnt, flx_heat, end_chnk_cnt, sysclock_rate, sysclock_max, chunk_cost)
@@ -1625,7 +1685,6 @@ subroutine tphysac (ztodt,   cam_in,  &
     integer :: lchnk                                ! chunk identifier
     integer :: ncol                                 ! number of atmospheric columns
     integer i,k,m                 ! Longitude, level indices
-    integer :: yr, mon, day, tod       ! components of a date
 
     logical :: labort                            ! abort flag
 
@@ -2224,6 +2283,7 @@ subroutine tphysbc (ztodt,               &
     use debug_info,      only: get_debug_chunk, get_debug_macmiciter
     use lnd_infodata,    only: precip_downscaling_method
     use cflx,            only: cflx_tend
+    use cam_control_mod, only: nsrest  ! restart flag
 
     implicit none
 
@@ -2380,6 +2440,9 @@ subroutine tphysbc (ztodt,               &
     logical :: l_st_mic
     logical :: l_rad
     !HuiWan (2014/15): added for a short-term time step convergence test ==
+#if defined(CLDERA_PROFILING)
+    integer :: ymd, yr, mon, day, tod
+#endif
 
     ! Numerical schemes for process coupling
     integer :: cflx_cpl_opt  ! When to apply surface tracer fluxes  (not including water vapor).
