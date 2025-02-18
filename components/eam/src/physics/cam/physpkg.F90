@@ -2282,6 +2282,7 @@ subroutine tphysbc (ztodt,               &
     use nudging,         only: Nudge_Model,Nudge_Loc_PhysOut,nudging_calc_tend
     use debug_info,      only: get_debug_chunk, get_debug_macmiciter
     use lnd_infodata,    only: precip_downscaling_method
+    use cflx,            only: cflx_tend
 
     implicit none
 
