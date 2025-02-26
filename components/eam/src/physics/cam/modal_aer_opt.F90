@@ -1362,14 +1362,6 @@ subroutine modal_aero_sw(list_idx, dt, state, pbuf, nnite, idxnite, is_cmip6_vol
       call outfld('AODLIP',         lipaod,    pcols, lchnk)
 #endif
 
-#if defined(CLDERA_PROFILING)
-      call cldera_set_field_part_data("ABSORB" ,lchnk-begchunk+1,absorb)
-      call cldera_set_field_part_data("AODVIS" ,lchnk-begchunk+1,aodvis)
-      call cldera_set_field_part_data("AODALL" ,lchnk-begchunk+1,aodall)
-      call cldera_set_field_part_data("AODABS" ,lchnk-begchunk+1,aodabs)
-      call cldera_set_field_part_data("BURDENSO4" ,lchnk-begchunk+1,burdenso4)
-#endif
-
    end if
 
 end subroutine modal_aero_sw
