@@ -291,6 +291,10 @@ OPTIONS
    Options for radiation:
 
      -rrtmgpxx          Use RRTMGP++ code
+
+  Options for CLDERA-E3SM
+
+     -cldera_profiling  Build EAM with support for CLDERA profiling, linking to cldera-profiling
 EOF
 }
 
@@ -367,6 +371,7 @@ GetOptions(
     "crm=s"                     => \$opts{'crm'},
     "pam_dycor=s"               => \$opts{'pam_dycor'},
     "rrtmgpxx"                  => \$opts{'rrtmgpxx'},
+    "cldera_profiling"          => \$opts{'cldera_profiling'},
     "debug"                     => \$opts{'debug'},
     "rain_evap_to_coarse_aero"  => \$opts{'rain_evap_to_coarse_aero'},
     "bc_dep_to_snow_updates"    => \$opts{'bc_dep_to_snow_updates'},

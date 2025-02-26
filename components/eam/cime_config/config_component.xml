@@ -55,6 +55,9 @@
       <value compset="_ELM%[^_]*BC"            >-bc_dep_to_snow_updates</value>
       <value compset="_EAM.*_BGC%*"            >-co2_cycle</value>
 
+      <!-- CLDERA support -->
+      <value compset="CLDERA"        >-cldera_profiling</value>
+
       <!-- Temporarily override the default v3 vertical grid (L80) and use L72 to maintain RRM test coverage -->
       <value grid="a%ne0">-nlev 72</value>
 
@@ -237,6 +240,7 @@
     <value compset="DOCN%AQP">$SRCROOT/components/eam/cime_config/usermods_dirs/aquap</value>
     <value compset="EAM%RCE">$SRCROOT/components/eam/cime_config/usermods_dirs/rcemip</value>
     <value compset="EAM%SCM">$SRCROOT/components/eam/cime_config/usermods_dirs/scm</value>
+    <value compset="EAM%CMIP6-CLDERA">$SRCROOT/components/eam/cime_config/usermods_dirs/volcaero</value>
     </values>
     <group>run_component_cam</group>
     <file>env_case.xml</file>
