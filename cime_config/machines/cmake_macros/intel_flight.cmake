@@ -1,5 +1,5 @@
 set(ALBANY_PATH "/projects/ccsm/AlbanyTrilinos_20190904/albany-build/install")
-set(CLDERA_PATH "/projects/sctr/cldera-tools/cldera-tools-install")
+set(CLDERA_PATH "/tscratch/gbharpe/SCTR/cldera-tools/cldera-tools-install")
 if (COMP_NAME STREQUAL gptl)
   string(APPEND CPPDEFS " -DHAVE_SLASHPROC")
 endif()
