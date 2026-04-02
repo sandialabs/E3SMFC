@@ -372,6 +372,7 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
 
    ! 2d, mid points (copy)
    call cldera_add_partitioned_field("Mass_so4",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+   call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
 
    ! 2d, interfaces
    dims(2) = pver+1
@@ -515,6 +516,7 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
      call cldera_set_field_part_extent("AODSO4", ipart,ncols)
      call cldera_set_field_part_extent("BURDENSO4", ipart,ncols)
      call cldera_set_field_part_extent("Mass_so4", ipart,ncols)
+     call cldera_set_field_part_extent("forcing_sai", ipart,ncols)
    enddo
 
    call cldera_commit_all_fields()

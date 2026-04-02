@@ -212,12 +212,8 @@ contains
     character(len=80) :: data_units
 
 #if defined(CLDERA_PROFILING)
-    character(len=max_str_len) :: fname
-    integer :: c, nfields, rank, icmp, nparts, part_dim, ipart, fsize, ncols
-    integer :: nlcols,irank,part_alloc_size
-    integer :: dims(3)
-    character(len=max_str_len) :: dimnames(3)
-    real(r8), pointer :: field1d(:), field2d(:,:), field3d(:,:,:)
+    integer :: c, nparts, ipart
+    real(r8), pointer :: field2d(:,:)
 #endif
 
     call specify_fields( specifier, flds )
@@ -449,27 +445,6 @@ contains
        end if
     endif
 
-#if defined(CLDERA_PROFILING)
-
-    ! allocate dimensions and information related to the forcing dimensions
-    nparts = endchunk - begchunk + 1
-
-    ! all fields are partitioned into chunks over cols index, which is the first
-    part_dim = 1
-    ! this would give exact size, but data is allocated using pcols
-    nlcols = 0
-    do c = begchunk,endchunk
-      nlcols = nlcols +  get_ncols_p(c)
-    enddo
-    dims(1) = nlcols
-    dimnames(1) = 'ncol'
-
-    part_alloc_size = pcols
-
-    ! there will be either 1 level or pver levels depending on if the tracer has levels
-    dims(2) = 1
-    dimnames(2) = 'lev'
-#endif
 
     flds_loop: do f = 1,mxnflds
 
@@ -601,37 +576,21 @@ contains
        flds(f)%units = data_units(1:32)
 
 #if defined(CLDERA_PROFILING)
+       ! TODO: if we for some unknown reason have two separate input files with 'sai' fields, this will go crazy
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
-        ! get the number of levels on this field, just to be safe
-        dims(2) = size(flds(f)%data,2)
-        ! add a partitioned field with this name
-        !call cldera_add_partitioned_field('forcing_'//flds(f)%srcnam,2,dims,dimnames,nparts,part_dim,part_alloc_size)
-        ! for each chunk, set the extent and data
-        do ipart = 1,nparts
-            c = begchunk+ipart-1 ! chunk number
-            ncols = get_ncols_p(c)
-            field2d => flds(f)%data(:,:,c)
-            !call cldera_set_field_part_extent('forcing_'//flds(f)%srcnam,ipart,ncols)
-            !call cldera_set_field_part_data('forcing_'//flds(f)%srcnam,ipart,field2d)
-        enddo
-        !call cldera_commit_all_fields()
-      endif
+         ! count number of chunks owned by this process
+         nparts = endchunk - begchunk + 1
+         ! for each chunk, set the extent and data
+         do ipart = 1,nparts
+           c = begchunk+ipart-1 ! chunk number
+           field2d => flds(f)%data(:,:,c)
+           !call cldera_set_field_part_data("Mass_so4" ,lchnk-begchunk+1,mass_so4(:ncol,:))
+           call cldera_set_field_part_data('forcing_sai',ipart,field2d)
+         enddo
+       endif
 #endif
 
     enddo flds_loop
-
-#if defined(CLDERA_PROFILING)
-    !do f = 1,mxnflds
-    !  ! register the field if it's sai
-    !  if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
-    !
-    !    
-    !    if ( masterproc ) then
-    !      write(iulog,*)'GH registering sai field'
-    !    endif
-    !  endif
-    !enddo
-#endif
 
 ! if weighting by latitude, compute weighting for horizontal interpolation
     if( file%weight_by_lat ) then
@@ -2044,54 +2003,28 @@ contains
     integer :: chnk_offset
 
 #if defined(CLDERA_PROFILING)
-    character(len=max_str_len) :: fname
-    integer :: nfields, rank, icmp, nparts, part_dim, ipart, fsize, ncols
-    integer :: nlcols,irank,part_alloc_size
-    integer :: dims(3)
-    character(len=max_str_len) :: dimnames(3)
-    real(r8), pointer :: field1d(:), field2d(:,:), field3d(:,:,:)
+    integer :: nparts, ipart
+    real(r8), pointer :: field2d(:,:)
 #endif
 
     nflds = size(flds)
 
-#if defined(CLDERA_PROFILING)
-
-    ! allocate dimensions and information related to the forcing dimensions
-    nparts = endchunk - begchunk + 1
-
-    ! all fields are partitioned into chunks over cols index, which is the first
-    part_dim = 1
-    ! this would give exact size, but data is allocated using pcols
-    nlcols = 0
-    do c = begchunk,endchunk
-      nlcols = nlcols +  get_ncols_p(c)
-    enddo
-    dims(1) = nlcols
-    dimnames(1) = 'ncol'
-
-    part_alloc_size = pcols
-
-    ! there will be either 1 level or pver levels depending on if the tracer has levels
-    dims(2) = 1
-    dimnames(2) = 'lev'
-#endif
-
     ! logging for graham
-    if ( masterproc ) then
-      write(iulog,*)'GH interpolate_trcdata'
-      write(iulog,*)'GH file=',file%curr_filename
-      write(iulog,*)'GH has_ps=',file%has_ps
-      write(iulog,*)'GH nlev=',file%nlev
-      do f = 1,nflds
-        write(iulog,*)'GH srcnam=',flds(f)%srcnam
-        write(iulog,*)'GH fldnam=',flds(f)%fldnam
-        if ( flds(f)%pbuf_ndx>0 ) then
-          write(iulog,*)'GH registered to pbuf'
-        else
-          write(iulog,*)'GH not registered to pbuf'
-        endif
-      enddo
-    endif
+    !if ( masterproc ) then
+    !  write(iulog,*)'GH interpolate_trcdata'
+    !  write(iulog,*)'GH file=',file%curr_filename
+    !  write(iulog,*)'GH has_ps=',file%has_ps
+    !  write(iulog,*)'GH nlev=',file%nlev
+    !  do f = 1,nflds
+    !    write(iulog,*)'GH srcnam=',flds(f)%srcnam
+    !    write(iulog,*)'GH fldnam=',flds(f)%fldnam
+    !    if ( flds(f)%pbuf_ndx>0 ) then
+    !      write(iulog,*)'GH registered to pbuf'
+    !    else
+    !      write(iulog,*)'GH not registered to pbuf'
+    !    endif
+    !  enddo
+    !endif
 
     if ( file%interp_recs == 4 ) then
        deltat = file%datatimes(3) - file%datatimes(1)
@@ -2257,46 +2190,31 @@ contains
           endif
        enddo
 
-      ! TODO: re-merge the cldera-tools hook here
-      ! re-write the field if it's volc
-      !if ( trim(flds(f)%srcnam) .eq. 'volc' ) then
-      !  if ( masterproc ) then
-      !    write(iulog,*)'GH modifying volc field'
-      !  endif
-      !  data_out3d(:,:) = 0.0_r8 ! zero out the field
-      !  data_out3d(1,1,31) = 1.e-6_r8 ! this is probably still a very large injection
-      !endif
-
 
 #if defined(CLDERA_PROFILING)
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
-        ! get the number of levels on this field, just to be safe
-        dims(2) = size(flds(f)%data,2)
-        ! add a partitioned field with this name
-        !call cldera_add_partitioned_field('forcing_'//flds(f)%srcnam,2,dims,dimnames,nparts,part_dim,part_alloc_size)
-        ! for each chunk, set the extent and data
-        do ipart = 1,nparts
-            c = begchunk+ipart-1 ! chunk number
-            ncols = get_ncols_p(c)
-            field2d => flds(f)%data(:,:,c)
-            !call cldera_set_field_part_extent('forcing_'//flds(f)%srcnam,ipart,ncols)
-            !call cldera_set_field_part_data('forcing_'//flds(f)%srcnam,ipart,field2d)
-        enddo
-        !call cldera_commit_all_fields()
-      endif
+         ! allocate dimensions and information related to the forcing dimensions
+         nparts = endchunk - begchunk + 1
+         ! for each chunk, set the extent and data
+         do ipart = 1,nparts
+           c = begchunk+ipart-1 ! chunk number
+           field2d => flds(f)%data(:,:,c)
+           call cldera_set_field_part_data('forcing_sai',ipart,field2d)
+         enddo
+       endif
 #endif
 
       ! re-write the field if it's sai
-      if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
-        if ( masterproc ) then
-          write(iulog,*)'GH modifying sai field'
-        endif
-        data_out3d(:,:,:) = 0.0_r8 ! zero out the field
+      !if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
+        !if ( masterproc ) then
+        !  write(iulog,*)'GH modifying sai field'
+        !endif
+        ! data_out3d(:,:,:) = 0.0_r8 ! zero out the field
         ! the molecular mass of SO2 is 64.066g/mol
         ! one mol is 6.022 x 10^23 molecules
         ! 31536000 seconds in a year
-        data_out3d(1,10,1) = 2.98e+9_r8 ! this is approximately molecules per second, but may be off by the grid size volume factor
-      endif
+        ! data_out3d(1,10,1) = 2.98e+9_r8 ! this is approximately molecules per second, but may be off by the grid size volume factor
+      !endif
 
     enddo fld_loop
 
