@@ -212,8 +212,10 @@ contains
     character(len=80) :: data_units
 
 #if defined(CLDERA_PROFILING)
-    integer :: c, nparts, ipart
+    integer :: c, nparts, ipart, nlcols, part_dim, part_alloc_size, ncols
     real(r8), pointer :: field2d(:,:)
+    integer :: dims(2)
+    character(len=max_str_len) :: dimnames(2)
 #endif
 
     call specify_fields( specifier, flds )
@@ -446,6 +448,23 @@ contains
     endif
 
 
+#if defined(CLDERA_PROFILING)
+       ! we have to compute these here because tracer_data.F90 trcdata_init runs before cam_init completes
+       ! All fields are partitioned over cols index, which is the first
+       part_dim = 1
+       nlcols = 0
+       do c = begchunk,endchunk
+         nlcols = nlcols +  get_ncols_p(c)
+       enddo
+       part_alloc_size = pcols
+
+       dims(1) = nlcols
+       dimnames(1) = 'ncol'
+       dims(2) = pver
+       dimnames(2) = 'lev'
+#endif
+
+
     flds_loop: do f = 1,mxnflds
 
        ! initialize the coordinate values to -1,
@@ -578,14 +597,28 @@ contains
 #if defined(CLDERA_PROFILING)
        ! TODO: if we for some unknown reason have two separate input files with 'sai' fields, this will go crazy
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
+         write(iulog,*) 'GH trcdata_init add SAI', nparts, ', ', part_dim, ', ', part_alloc_size
          ! count number of chunks owned by this process
          nparts = endchunk - begchunk + 1
-         ! for each chunk, set the extent and data
+         call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+         ! for each chunk, set the extent
+         do ipart = 1,nparts
+           c = begchunk+ipart-1 ! chunk number
+           ncols = get_ncols_p(c)
+           call cldera_set_field_part_extent("forcing_sai", ipart,ncols)
+         enddo
+
+
+         write(iulog,*) 'GH trcdata_init commit SAI'
+         call cldera_commit_field("forcing_sai")
+
+         ! for each chunk, set the data
+         write(iulog,*) 'GH interpolate_trcdata data SAI'
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            field2d => flds(f)%data(:,:,c)
-           !call cldera_set_field_part_data("Mass_so4" ,lchnk-begchunk+1,mass_so4(:ncol,:))
-           call cldera_set_field_part_data('forcing_sai',ipart,field2d)
+           ncols = get_ncols_p(c)
+           call cldera_set_field_part_data("forcing_sai",ipart,field2d)
          enddo
        endif
 #endif
@@ -2193,13 +2226,14 @@ contains
 
 #if defined(CLDERA_PROFILING)
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
+         write(iulog,*) 'GH interpolate_trcdata SAI'
          ! allocate dimensions and information related to the forcing dimensions
          nparts = endchunk - begchunk + 1
          ! for each chunk, set the extent and data
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            field2d => flds(f)%data(:,:,c)
-           call cldera_set_field_part_data('forcing_sai',ipart,field2d)
+           ! call cldera_set_field_part_data('forcing_sai',ipart,field2d)
          enddo
        endif
 #endif
