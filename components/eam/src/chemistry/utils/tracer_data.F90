@@ -597,7 +597,8 @@ contains
 #if defined(CLDERA_PROFILING)
        ! TODO: if we for some unknown reason have two separate input files with 'sai' fields, this will go crazy
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
-         write(iulog,*) 'GH trcdata_init add SAI', nparts, ', ', part_dim, ', ', part_alloc_size
+         ! write(iulog,*) 'GH trcdata_init add SAI', nparts, ', ', part_dim, ', ', part_alloc_size
+         ! GH trcdata_init add SAI          32 ,            1 ,           10 (on flight)
          ! count number of chunks owned by this process
          nparts = endchunk - begchunk + 1
          call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
@@ -2226,14 +2227,14 @@ contains
 
 #if defined(CLDERA_PROFILING)
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
-         write(iulog,*) 'GH interpolate_trcdata SAI'
+         ! write(iulog,*) 'GH interpolate_trcdata SAI'
          ! allocate dimensions and information related to the forcing dimensions
          nparts = endchunk - begchunk + 1
          ! for each chunk, set the extent and data
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            field2d => flds(f)%data(:,:,c)
-           ! call cldera_set_field_part_data('forcing_sai',ipart,field2d)
+           call cldera_set_field_part_data('forcing_sai',ipart,field2d)
          enddo
        endif
 #endif
