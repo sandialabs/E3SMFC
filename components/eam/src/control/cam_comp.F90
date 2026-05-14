@@ -143,7 +143,7 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    character(len=cs) :: filein ! Input namelist filename
 #if defined(CLDERA_PROFILING)
    character(len=max_str_len) :: fname
-   integer :: c, nfields, idx, rank, icmp, nparts, part_dim, ipart, fsize, ncols
+   integer :: c, nfields, idx, rank, icmp, nparts, part_dim, ipart, fsize, ncols, icall
    integer :: nlcols,irank,part_alloc_size
    integer :: dims(3)
    integer, allocatable :: cols_gids(:)
@@ -153,6 +153,7 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    real(r8), pointer :: field1d(:), field2d(:,:), field3d(:,:,:)
    type(physics_buffer_desc), pointer :: field_desc
    character(len=5) :: int_str
+   character(len=4) :: diag(0:3) = (/'    ','_d1 ','_d2 ','_d3 '/)
 #endif
    !-----------------------------------------------------------------------
    etamid = nan
@@ -318,6 +319,8 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    enddo
 
    ! TRACERS fields
+   dims(2) = plev
+   dimnames(2) = "lev"
    do idx=1,pcnst
      fname = cnst_name(idx)
 
@@ -343,17 +346,53 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    call cldera_add_partitioned_field("phis",1,dims,dimnames,nparts,part_dim,part_alloc_size)
 
    ! Last arg is view=false, since these fields are *not* views of EAM persistent data.
+   ! aer_rad_props
    call cldera_add_partitioned_field("AEROD_v", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+   ! modal_aer_opt
    call cldera_add_partitioned_field("AODALL", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    call cldera_add_partitioned_field("ABSORB", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    call cldera_add_partitioned_field("AODVIS", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    call cldera_add_partitioned_field("AODABS", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
-   call cldera_add_partitioned_field("aod"    , 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
-   call cldera_add_partitioned_field("aod_so2", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
-   call cldera_add_partitioned_field("aod_ash", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
-   call cldera_add_partitioned_field("aod_sulf",1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    call cldera_add_partitioned_field("AODSO4", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    call cldera_add_partitioned_field("BURDENSO4", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+   ! radiation
+   do icall = 1,0,-1 ! profile climate calculation and three diags for now
+      if (masterproc) then
+        write(iulog,*)'GH adding diagnostic variable icall=', icall, ' with name=', diag(icall)
+      endif
+      call cldera_add_partitioned_field("SOLIN"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSDS"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNIRTOA"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNRTOAC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNRTOAS"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNT"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNS"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNTC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNSC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSDSC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNTOA"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSUTOA"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSNTOAC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSUTOAC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("SOLS"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("SOLL"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("SOLSD"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("SOLLD"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSN200"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FSN200C"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("SWCF"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLNT"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLUT"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLUTC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLNTC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLNS"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLDSC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLNSC"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("LWCF"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLN200"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLN200C"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("FLDS"//diag(icall), 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+   end do
 
    !2d, mid points
    dims(2) = pver
@@ -371,8 +410,17 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    call cldera_add_partitioned_field("zm",2,dims,dimnames,nparts,part_dim,part_alloc_size)
 
    ! 2d, mid points (copy)
+   ! radiation
+   do icall = 1,0,-1 ! profile climate calculation & three diags for now
+      call cldera_add_partitioned_field('QRS'//diag(icall), 2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field('QRSC'//diag(icall), 2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("QRL"//diag(icall), 2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+      call cldera_add_partitioned_field("QRLC"//diag(icall), 2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+   end do
    call cldera_add_partitioned_field("Mass_so4",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
-   ! call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+   ! custom
+   call cldera_add_partitioned_field("dz",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+   ! call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.) ! cannot be here because tracer init happens first
 
    ! 2d, interfaces
    dims(2) = pver+1
@@ -464,6 +512,9 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
      call cldera_set_field_part_extent("zm",ipart,ncols)
      call cldera_set_field_part_data("zm",ipart,field2d)
 
+     ! custom dz
+     call cldera_set_field_part_extent("dz",ipart,ncols)
+
      ! 2d int
      field2d => phys_state(c)%pint(:,:)
      call cldera_set_field_part_extent("pint",ipart,ncols)
@@ -504,22 +555,69 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
      call cldera_set_field_part_data("LHFLX",ipart,field1d)
 
      ! Copied field
+     ! aer_rad_props
      call cldera_set_field_part_extent("AEROD_v", ipart,ncols)
+     ! modal_aer_opt
      call cldera_set_field_part_extent("AODALL", ipart,ncols)
      call cldera_set_field_part_extent("ABSORB", ipart,ncols)
      call cldera_set_field_part_extent("AODVIS", ipart,ncols)
      call cldera_set_field_part_extent("AODABS", ipart,ncols)
-     call cldera_set_field_part_extent("aod"    , ipart,ncols)
-     call cldera_set_field_part_extent("aod_so2", ipart,ncols)
-     call cldera_set_field_part_extent("aod_ash", ipart,ncols)
-     call cldera_set_field_part_extent("aod_sulf",ipart,ncols)
      call cldera_set_field_part_extent("AODSO4", ipart,ncols)
      call cldera_set_field_part_extent("BURDENSO4", ipart,ncols)
+     ! radiation
+     do icall = 1,0,-1 ! profile climate calculation & three diags for now
+       call cldera_set_field_part_extent("SOLIN"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSDS"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNIRTOA"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNRTOAC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNRTOAS"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNT"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNS"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNTC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNSC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSDSC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNTOA"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSUTOA"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSNTOAC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSUTOAC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("SOLS"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("SOLL"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("SOLSD"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("SOLLD"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSN200"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FSN200C"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("SWCF"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLNT"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLUT"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLUTC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLNTC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLNS"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLDSC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLNSC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("LWCF"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLN200"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLN200C"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("FLDS"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("QRS"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("QRSC"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("QRL"//diag(icall), ipart,ncols)
+       call cldera_set_field_part_extent("QRLC"//diag(icall), ipart,ncols)
+     end do
      call cldera_set_field_part_extent("Mass_so4", ipart,ncols)
-     ! call cldera_set_field_part_extent("forcing_sai", ipart,ncols)
+     ! call cldera_set_field_part_extent("forcing_sai", ipart,ncols) ! cannot be here because tracer init happens first
    enddo
 
    call cldera_commit_all_fields()
+
+   ! copy data (TODO: move into some physics calculations to update each time step)
+   do ipart = 1,nparts
+     c = begchunk+ipart-1 ! Chunk
+     ncols = phys_state(c)%ncol
+
+     field2d => phys_state(c)%zi(:,:)
+     call cldera_set_field_part_data("dz",ipart,field2d(:,1:) - field2d(:,:pver))
+   end do
+
    call t_stopf('cldera_add_fields')
 #endif
 

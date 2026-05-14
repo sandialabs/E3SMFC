@@ -1074,7 +1074,11 @@ contains
 #endif
 
     use phys_control, only: phys_getopts
-    
+#if defined(CLDERA_PROFILING)
+  use ppgrid,         only: begchunk
+  use cldera_interface_mod, only: cldera_set_field_part_data
+#endif
+
     implicit none
 
     !--------------------------------------------------------------------
@@ -1482,6 +1486,9 @@ contains
                 mass_3d_tmp = mass_pom(:ncol,:)
              case ("so4")
                 mass_3d_tmp = mass_so4(:ncol,:)
+#if defined(CLDERA_PROFILING)
+                call cldera_set_field_part_data("Mass_so4", lchnk-begchunk+1, mass_3d_tmp)
+#endif
              case ("soa")
                 mass_3d_tmp = mass_soa(:ncol,:)
           end select

@@ -609,12 +609,15 @@ contains
            call cldera_set_field_part_extent("forcing_sai", ipart,ncols)
          enddo
 
-
-         write(iulog,*) 'GH trcdata_init commit SAI'
+         if (masterproc) then
+           write(iulog,*) 'GH trcdata_init commit SAI'
+         endif
          call cldera_commit_field("forcing_sai")
 
          ! for each chunk, set the data
-         write(iulog,*) 'GH interpolate_trcdata data SAI'
+         if (masterproc) then
+           write(iulog,*) 'GH interpolate_trcdata data SAI'
+         endif
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            field2d => flds(f)%data(:,:,c)
