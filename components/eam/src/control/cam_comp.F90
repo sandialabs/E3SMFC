@@ -608,16 +608,6 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    enddo
 
    call cldera_commit_all_fields()
-
-   ! copy data (TODO: move into some physics calculations to update each time step)
-   do ipart = 1,nparts
-     c = begchunk+ipart-1 ! Chunk
-     ncols = phys_state(c)%ncol
-
-     field2d => phys_state(c)%zi(:,:)
-     call cldera_set_field_part_data("dz",ipart,field2d(:,1:) - field2d(:,:pver))
-   end do
-
    call t_stopf('cldera_add_fields')
 #endif
 

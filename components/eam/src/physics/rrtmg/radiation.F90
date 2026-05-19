@@ -874,7 +874,6 @@ end function radiation_nextsw_cday
     use orbit,            only: zenith
     use output_aerocom_aie , only: do_aerocom_ind3
 #if defined(CLDERA_PROFILING)
-    use ppgrid,         only: begchunk
     use cldera_interface_mod, only: cldera_set_field_part_data
 #endif
 
@@ -1062,6 +1061,9 @@ end function radiation_nextsw_cday
 
 
     character(*), parameter :: name = 'radiation_tend'
+#if defined(CLDERA_PROFILING)
+    real(r8), pointer :: field2d(:,:)
+#endif
 !----------------------------------------------------------------------
 
     call t_startf ('radiation_tend_init')
@@ -1126,6 +1128,11 @@ end function radiation_nextsw_cday
           IdxNite(Nnite) = i
        end if
     end do
+
+#if defined(CLDERA_PROFILING)
+    field2d => state%zi(:,:)
+    call cldera_set_field_part_data("dz", lchnk-begchunk+1, field2d(:,2:) - field2d(:,:pver))
+#endif
 
     dosw     = radiation_do('sw')      ! do shortwave heating calc this timestep?
     dolw     = radiation_do('lw')      ! do longwave heating calc this timestep?
@@ -1407,7 +1414,6 @@ end function radiation_nextsw_cday
                      !call cldera_set_field_part_data('SWCF'//diag(icall),lchnk-begchunk+1,swcf)
                   endif
 #endif
-
               end if ! (active_calls(icall))
           end do ! icall
           call t_stopf ('rad_sw_loop')
