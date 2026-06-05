@@ -462,6 +462,8 @@ contains
        dimnames(1) = 'ncol'
        dims(2) = pver
        dimnames(2) = 'lev'
+
+       !write(*,*) 'GH PCOLS BEGCHUNK ENDCHUNK', pcols, begchunk, endchunk
 #endif
 
 
@@ -2040,8 +2042,9 @@ contains
     integer :: chnk_offset
 
 #if defined(CLDERA_PROFILING)
-    integer :: nparts, ipart
+    integer :: nparts, ipart, icol, ilev
     real(r8), pointer :: field2d(:,:)
+    real(r8), allocatable :: tmpfield2d(:,:)
 #endif
 
     nflds = size(flds)
@@ -2135,6 +2138,7 @@ contains
 
 !$OMP PARALLEL DO PRIVATE (C, NCOL, PS, I, K, PIN, DATAIN, MODEL_Z, DATA_OUT)
        do c = begchunk,endchunk
+          !write(iulog,*) 'GH OMP C ', c
           if (flds(f)%pbuf_ndx>0) then
              if(.not.present(pbuf2d)) then                
                 call endrun ('tracer_data.F90(subr interpolate_trcdata):' // &
@@ -2233,12 +2237,53 @@ contains
          ! write(iulog,*) 'GH interpolate_trcdata SAI'
          ! allocate dimensions and information related to the forcing dimensions
          nparts = endchunk - begchunk + 1
-         ! for each chunk, set the extent and data
+         !allocate(tmpfield2d(size(flds(f)%data,1),size(flds(f)%data,2)))
+         ! for each chunk, set the data
+         !do ipart = 1,nparts
+           !c = begchunk+ipart-1 ! chunk number
+           !if (masterproc) then
+           !  write(iulog,*) 'GH lats'
+           !endif
+
+           !write(iulog,*) state(c)%lat
+           !if (masterproc) then
+           !  write(iulog,*) 'GH lons'
+           !endif
+
+           !write(iulog,*) state(c)%lon
+           !if (masterproc) then
+           !  write(iulog,*) 'GH SAI data'
+           !endif
+
+           !tmpfield2d = flds(f)%data(:,:,c)
+           !call cldera_set_field_part_data('forcing_sai',ipart,tmpfield2d)
+         !enddo
+         !deallocate(tmpfield2d)
+         !write(iulog,*) flds(f)%data(:,:,:)
+
+         ! zero the field out
+         flds(f)%data(:,:,:) = 0.0_r8
+
+
+         !write(*,*) 'GH SAI SIZE ', size(flds(f)%data,1), size(flds(f)%data,2), size(flds(f)%data,3)
+         do ipart = 1,nparts
+           c = begchunk+ipart-1 ! chunk number
+           !write(*,*) 'GH LAT SIZE ', size(state(c)%lat)
+           do icol = 1,size(flds(f)%data,1)
+             !do ilev = 1,size(flds(f)%data,2)
+             if ( abs(state(c)%lat(icol) - 0.872) < 0.0872 ) then
+               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol)
+               flds(f)%data(icol,30,c) = 1.0e6_r8
+             endif
+           enddo
+         enddo
+
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            field2d => flds(f)%data(:,:,c)
            call cldera_set_field_part_data('forcing_sai',ipart,field2d)
          enddo
+
        endif
 #endif
 
