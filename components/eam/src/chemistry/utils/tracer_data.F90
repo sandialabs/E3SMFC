@@ -2015,7 +2015,7 @@ contains
                                     cldera_set_field_part_data, &
                                     cldera_commit_all_fields,   &
                                     cldera_commit_field
-    use phys_grid,       only: get_ncols_p, print_cost_p, update_cost_p, phys_proc_cost
+    use phys_grid,       only: get_ncols_p, print_cost_p, update_cost_p, phys_proc_cost, get_area_all_p
 #endif
 
     implicit none
@@ -2042,7 +2042,9 @@ contains
     integer :: chnk_offset
 
 #if defined(CLDERA_PROFILING)
-    integer :: nparts, ipart, icol, ilev
+    integer :: nparts, ipart, icol, ilev, writelev
+    real(r8) :: writeintegral
+    real(r8), allocatable :: cols_area(:)
     real(r8), pointer :: field2d(:,:)
     real(r8), allocatable :: tmpfield2d(:,:)
 #endif
@@ -2264,17 +2266,105 @@ contains
          ! zero the field out
          flds(f)%data(:,:,:) = 0.0_r8
 
+         if (.not. allocated(cols_area)) then
+           allocate(cols_area(pcols))
+         endif
 
          !write(*,*) 'GH SAI SIZE ', size(flds(f)%data,1), size(flds(f)%data,2), size(flds(f)%data,3)
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
-           !write(*,*) 'GH LAT SIZE ', size(state(c)%lat)
+           call get_area_all_p(c,pcols,cols_area)
+           
            do icol = 1,size(flds(f)%data,1)
-             !do ilev = 1,size(flds(f)%data,2)
-             if ( abs(state(c)%lat(icol) - 0.872) < 0.0872 ) then
-               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol)
-               flds(f)%data(icol,30,c) = 1.0e6_r8
+             ! 50N, 180E, 17km, 10Tg (within 5 degrees N/S/E/W)
+             writeintegral = 0.0_r8
+             if ( abs(state(c)%lat(icol) - 0.872) < 0.0872 .and. abs(state(c)%lon(icol) - 3.14159) < 0.0872 ) then
+               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 17000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = 1.0e7_r8
+               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e7_r8
              endif
+             write(*,*) 'GH INTEGRAL 1 ', writeintegral
+
+             ! 50S, 180E, 17km 10Tg (within 5 degrees N/S/E/W)
+             writeintegral = 0.0_r8
+             if ( abs(state(c)%lat(icol) + 0.872) < 0.0872 .and. abs(state(c)%lon(icol) - 3.14159) < 0.0872 ) then
+               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 17000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = 1.0e7_r8
+               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e7_r8
+             endif
+             write(*,*) 'GH INTEGRAL 2 ', writeintegral
+
+             ! 30N, 150E, 23km, 1Tg (within 5 degrees N/S/E/W)
+             writeintegral = 0.0_r8
+             if ( abs(state(c)%lat(icol) - 0.5235) < 0.0872 .and. abs(state(c)%lon(icol) - 2.61799) < 0.0872 ) then
+               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 23000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = 1.0e6_r8
+               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e6_r8
+             endif
+             write(*,*) 'GH INTEGRAL 3 ', writeintegral
+
+             ! 30S, 150E, 23km, 1Tg (within 5 degrees N/S/E/W)
+             writeintegral = 0.0_r8
+             if ( abs(state(c)%lat(icol) + 0.5235) < 0.0872 .and. abs(state(c)%lon(icol) - 2.61799) < 0.0872 ) then
+               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 23000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = 1.0e6_r8
+               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e6_r8
+             endif
+             write(*,*) 'GH INTEGRAL 4 ', writeintegral
+
+             ! 15N, 210E, 25km, 1Tg (within 5 degrees N/S/E/W)
+             writeintegral = 0.0_r8
+             if ( abs(state(c)%lat(icol) - 0.2617) < 0.0872 .and. abs(state(c)%lon(icol) - 3.66519) < 0.0872 ) then
+               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 25000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = 1.0e6_r8
+               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e6_r8
+             endif
+             write(*,*) 'GH INTEGRAL 5 ', writeintegral
+
+             ! 15S, 210E, 25km, 1Tg (within 5 degrees N/S/E/W)
+             writeintegral = 0.0_r8
+             if ( abs(state(c)%lat(icol) + 0.2617) < 0.0872 .and. abs(state(c)%lon(icol) - 3.66519) < 0.0872 ) then
+               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 25000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = 1.0e6_r8
+               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e6_r8
+             endif
+             write(*,*) 'GH INTEGRAL 6 ', writeintegral
            enddo
          enddo
 
