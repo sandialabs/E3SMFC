@@ -2016,6 +2016,7 @@ contains
                                     cldera_commit_all_fields,   &
                                     cldera_commit_field
     use phys_grid,       only: get_ncols_p, print_cost_p, update_cost_p, phys_proc_cost, get_area_all_p
+    use spmd_utils,      only: mpi_real8, mpicom, mpi_sum
 #endif
 
     implicit none
@@ -2042,10 +2043,18 @@ contains
     integer :: chnk_offset
 
 #if defined(CLDERA_PROFILING)
-    integer :: nparts, ipart, icol, ilev, writelev
-    real(r8) :: writeintegral
-    real(r8), allocatable :: cols_area(:)
-    real(r8), pointer :: field2d(:,:)
+    integer :: nparts, ipart, icol, ilev, writelev, ierr
+    real(r8) :: avo = 6.022e23
+    real(r8) :: mol_weight = 64.066
+    real(r8) :: secperyear = 31536000.0               ! store as real to avoid implicit type conversions
+    real(r8) :: gpertg = 1.0e12                       ! store as real to avoid implicit type conversions
+    real(r8) :: earth_radius = 6.37e6                 ! injection_amounts(i)*gpertg*avo/mol_weight/earth_radius/earth_radius/1e6/secperyear = write_integrals(i)
+    real(r8), allocatable :: injection_amounts(:)     ! this is the specified injection in Tg/yr
+    real(r8), allocatable :: injection_molecules(:)   ! this is the computed injection in molecules/cm3/s
+    real(r8), allocatable :: write_integrals(:)       ! this is the volume of injection sites in meters*steradians
+    real(r8), allocatable :: glb_write_integrals(:)   ! this is the MPI reduced volume of injection sites since they span multiple processors
+    real(r8), allocatable :: cols_area(:)             ! this stores column areas that we need to fetch from other parts of E3SM
+    real(r8), pointer :: field2d(:,:)                 ! field for cldera-tools tracking of this in case we need it
     real(r8), allocatable :: tmpfield2d(:,:)
 #endif
 
@@ -2235,66 +2244,80 @@ contains
 
 
 #if defined(CLDERA_PROFILING)
+       ! if we're working with the SAI field, then we make modifications
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
-         ! write(iulog,*) 'GH interpolate_trcdata SAI'
          ! allocate dimensions and information related to the forcing dimensions
          nparts = endchunk - begchunk + 1
-         !allocate(tmpfield2d(size(flds(f)%data,1),size(flds(f)%data,2)))
-         ! for each chunk, set the data
-         !do ipart = 1,nparts
-           !c = begchunk+ipart-1 ! chunk number
-           !if (masterproc) then
-           !  write(iulog,*) 'GH lats'
-           !endif
-
-           !write(iulog,*) state(c)%lat
-           !if (masterproc) then
-           !  write(iulog,*) 'GH lons'
-           !endif
-
-           !write(iulog,*) state(c)%lon
-           !if (masterproc) then
-           !  write(iulog,*) 'GH SAI data'
-           !endif
-
-           !tmpfield2d = flds(f)%data(:,:,c)
-           !call cldera_set_field_part_data('forcing_sai',ipart,tmpfield2d)
-         !enddo
-         !deallocate(tmpfield2d)
-         !write(iulog,*) flds(f)%data(:,:,:)
-
-         ! zero the field out
+         
+         ! zero the field out and ignore input from original SAI file
          flds(f)%data(:,:,:) = 0.0_r8
 
+         ! hack here to get column areas
          if (.not. allocated(cols_area)) then
            allocate(cols_area(pcols))
          endif
 
-         !write(*,*) 'GH SAI SIZE ', size(flds(f)%data,1), size(flds(f)%data,2), size(flds(f)%data,3)
+         ! write_integrals is the local volume being injected over in meters*steradians
+         if (.not. allocated(write_integrals)) then
+           allocate(write_integrals(6))
+         endif
+
+         ! glb_write_integrals is the MPI reduction of the injection sites, needed to calibrate injection
+         if (.not. allocated(glb_write_integrals)) then
+           allocate(glb_write_integrals(6))
+         endif
+
+         ! injection_amounts specifies the injection in units Tg/yr
+         if (.not. allocated(injection_amounts)) then
+           allocate(injection_amounts(6))
+           injection_amounts(1) = 1.0
+           injection_amounts(2) = 1.0
+           injection_amounts(3) = 1.0
+           injection_amounts(4) = 1.0
+           injection_amounts(5) = 1.0
+           injection_amounts(6) = 1.0
+         endif
+
+         if (.not. allocated(injection_molecules)) then
+           if (masterproc) then
+             write(*,*) 'GH allocate injection'
+           endif
+           allocate(injection_molecules(6))
+         endif
+
+         ! TODO: put injection lat/lon and level here as well
+
+         ! TODO: we should probably free things somewhere, but I don't think we have to worry about memory leaks
+
+         ! zero out integrals
+         write_integrals = 0.0_r8
+         glb_write_integrals = 0.0_r8
+
+         ! PART 1: COMPUTE INJECTION VOLUMES
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            call get_area_all_p(c,pcols,cols_area)
            
            do icol = 1,size(flds(f)%data,1)
              ! 50N, 180E, 17km, 10Tg (within 5 degrees N/S/E/W)
-             writeintegral = 0.0_r8
              if ( abs(state(c)%lat(icol) - 0.872) < 0.0872 .and. abs(state(c)%lon(icol) - 3.14159) < 0.0872 ) then
-               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               write(*,*) 'GH FOUND INJECTION SITE 1 ', state(c)%lat(icol), state(c)%lon(icol)
+               writelev = 1 ! default write level
                do ilev = 1,size(flds(f)%data,2)
                  if (state(c)%zi(icol,ilev) > 17000.0) then
+                   write(*,*) 'GH INJECTION SITE 1 LEVEL ', ilev
                    writelev = ilev
                    exit
                  endif
                enddo
                flds(f)%data(icol,writelev,c) = 1.0e7_r8
-               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e7_r8
+               write_integrals(1) = write_integrals(1) + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))
              endif
-             write(*,*) 'GH INTEGRAL 1 ', writeintegral
-
+           
              ! 50S, 180E, 17km 10Tg (within 5 degrees N/S/E/W)
-             writeintegral = 0.0_r8
              if ( abs(state(c)%lat(icol) + 0.872) < 0.0872 .and. abs(state(c)%lon(icol) - 3.14159) < 0.0872 ) then
-               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               !write(*,*) 'GH FOUND INJECTION SITE 2 ', state(c)%lat(icol), state(c)%lon(icol)
+               writelev = 1 ! default write level
                do ilev = 1,size(flds(f)%data,2)
                  if (state(c)%zi(icol,ilev) > 17000.0) then
                    writelev = ilev
@@ -2302,14 +2325,13 @@ contains
                  endif
                enddo
                flds(f)%data(icol,writelev,c) = 1.0e7_r8
-               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e7_r8
+               write_integrals(2) = write_integrals(2) + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))
              endif
-             write(*,*) 'GH INTEGRAL 2 ', writeintegral
-
+           
              ! 30N, 150E, 23km, 1Tg (within 5 degrees N/S/E/W)
-             writeintegral = 0.0_r8
              if ( abs(state(c)%lat(icol) - 0.5235) < 0.0872 .and. abs(state(c)%lon(icol) - 2.61799) < 0.0872 ) then
-               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               !write(*,*) 'GH FOUND INJECTION SITE 3 ', state(c)%lat(icol), state(c)%lon(icol)
+               writelev = 1 ! default write level
                do ilev = 1,size(flds(f)%data,2)
                  if (state(c)%zi(icol,ilev) > 23000.0) then
                    writelev = ilev
@@ -2317,14 +2339,13 @@ contains
                  endif
                enddo
                flds(f)%data(icol,writelev,c) = 1.0e6_r8
-               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e6_r8
+               write_integrals(3) = write_integrals(3) + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))
              endif
-             write(*,*) 'GH INTEGRAL 3 ', writeintegral
-
+           
              ! 30S, 150E, 23km, 1Tg (within 5 degrees N/S/E/W)
-             writeintegral = 0.0_r8
              if ( abs(state(c)%lat(icol) + 0.5235) < 0.0872 .and. abs(state(c)%lon(icol) - 2.61799) < 0.0872 ) then
-               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               !write(*,*) 'GH FOUND INJECTION SITE 4 ', state(c)%lat(icol), state(c)%lon(icol)
+               writelev = 1 ! default write level
                do ilev = 1,size(flds(f)%data,2)
                  if (state(c)%zi(icol,ilev) > 23000.0) then
                    writelev = ilev
@@ -2332,14 +2353,13 @@ contains
                  endif
                enddo
                flds(f)%data(icol,writelev,c) = 1.0e6_r8
-               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e6_r8
+               write_integrals(4) = write_integrals(4) + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))
              endif
-             write(*,*) 'GH INTEGRAL 4 ', writeintegral
-
+           
              ! 15N, 210E, 25km, 1Tg (within 5 degrees N/S/E/W)
-             writeintegral = 0.0_r8
              if ( abs(state(c)%lat(icol) - 0.2617) < 0.0872 .and. abs(state(c)%lon(icol) - 3.66519) < 0.0872 ) then
-               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               !write(*,*) 'GH FOUND INJECTION SITE 5 ', state(c)%lat(icol), state(c)%lon(icol)
+               writelev = 1 ! default write level
                do ilev = 1,size(flds(f)%data,2)
                  if (state(c)%zi(icol,ilev) > 25000.0) then
                    writelev = ilev
@@ -2347,14 +2367,13 @@ contains
                  endif
                enddo
                flds(f)%data(icol,writelev,c) = 1.0e6_r8
-               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e6_r8
+               write_integrals(5) = write_integrals(5) + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))
              endif
-             write(*,*) 'GH INTEGRAL 5 ', writeintegral
-
+           
              ! 15S, 210E, 25km, 1Tg (within 5 degrees N/S/E/W)
-             writeintegral = 0.0_r8
              if ( abs(state(c)%lat(icol) + 0.2617) < 0.0872 .and. abs(state(c)%lon(icol) - 3.66519) < 0.0872 ) then
-               write(*,*) 'GH FOUND INJECTION SITE ', state(c)%lat(icol), state(c)%lon(icol)
+               !write(*,*) 'GH FOUND INJECTION SITE 6 ', state(c)%lat(icol), state(c)%lon(icol)
+               writelev = 1 ! default write level
                do ilev = 1,size(flds(f)%data,2)
                  if (state(c)%zi(icol,ilev) > 25000.0) then
                    writelev = ilev
@@ -2362,12 +2381,111 @@ contains
                  endif
                enddo
                flds(f)%data(icol,writelev,c) = 1.0e6_r8
-               writeintegral = writeintegral + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))*1.0e6_r8
+               write_integrals(6) = write_integrals(6) + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))
              endif
-             write(*,*) 'GH INTEGRAL 6 ', writeintegral
            enddo
          enddo
 
+         call mpi_allreduce(write_integrals, glb_write_integrals, 6, mpi_real8, mpi_sum, mpicom, ierr)
+         if (masterproc) then
+           write(*,*) 'GH INTEGRAL 1 ', glb_write_integrals(1)
+           write(*,*) 'GH INTEGRAL 2 ', glb_write_integrals(2)
+           write(*,*) 'GH INTEGRAL 3 ', glb_write_integrals(3)
+           write(*,*) 'GH INTEGRAL 4 ', glb_write_integrals(4)
+           write(*,*) 'GH INTEGRAL 5 ', glb_write_integrals(5)
+           write(*,*) 'GH INTEGRAL 6 ', glb_write_integrals(6)
+         endif
+
+         ! TODO: wrap everything in loops (need arrays for injection site coords/heights)
+         ! calculate the injections in molecules/cm3/sec
+         injection_molecules(1) = glb_write_integrals(1)*gpertg*avo/mol_weight/earth_radius/earth_radius/1.0e6/secperyear
+         injection_molecules(2) = glb_write_integrals(2)*gpertg*avo/mol_weight/earth_radius/earth_radius/1.0e6/secperyear
+         injection_molecules(3) = glb_write_integrals(3)*gpertg*avo/mol_weight/earth_radius/earth_radius/1.0e6/secperyear
+         injection_molecules(4) = glb_write_integrals(4)*gpertg*avo/mol_weight/earth_radius/earth_radius/1.0e6/secperyear
+         injection_molecules(5) = glb_write_integrals(5)*gpertg*avo/mol_weight/earth_radius/earth_radius/1.0e6/secperyear
+         injection_molecules(6) = glb_write_integrals(6)*gpertg*avo/mol_weight/earth_radius/earth_radius/1.0e6/secperyear
+
+         ! PART 2: WRITE INJECTION AMOUNTS
+         do ipart = 1,nparts
+           c = begchunk+ipart-1 ! chunk number
+           call get_area_all_p(c,pcols,cols_area)
+           
+           do icol = 1,size(flds(f)%data,1)
+             ! 50N, 180E, 17km, 10Tg (within 5 degrees N/S/E/W)
+             if ( abs(state(c)%lat(icol) - 0.872) < 0.0872 .and. abs(state(c)%lon(icol) - 3.14159) < 0.0872 ) then
+               writelev = 1 ! default write level
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 17000.0) then
+                   write(*,*) 'GH INJECTION SITE 1 LEVEL ', ilev
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = injection_molecules(1)
+             endif
+           
+             ! 50S, 180E, 17km 10Tg (within 5 degrees N/S/E/W)
+             if ( abs(state(c)%lat(icol) + 0.872) < 0.0872 .and. abs(state(c)%lon(icol) - 3.14159) < 0.0872 ) then
+               writelev = 1 ! default write level
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 17000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = injection_molecules(2)
+             endif
+           
+             ! 30N, 150E, 23km, 1Tg (within 5 degrees N/S/E/W)
+             if ( abs(state(c)%lat(icol) - 0.5235) < 0.0872 .and. abs(state(c)%lon(icol) - 2.61799) < 0.0872 ) then
+               writelev = 1 ! default write level
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 23000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = injection_molecules(3)
+             endif
+           
+             ! 30S, 150E, 23km, 1Tg (within 5 degrees N/S/E/W)
+             if ( abs(state(c)%lat(icol) + 0.5235) < 0.0872 .and. abs(state(c)%lon(icol) - 2.61799) < 0.0872 ) then
+               writelev = 1 ! default write level
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 23000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = injection_molecules(4)
+             endif
+           
+             ! 15N, 210E, 25km, 1Tg (within 5 degrees N/S/E/W)
+             if ( abs(state(c)%lat(icol) - 0.2617) < 0.0872 .and. abs(state(c)%lon(icol) - 3.66519) < 0.0872 ) then
+               writelev = 1 ! default write level
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 25000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = injection_molecules(5)
+             endif
+           
+             ! 15S, 210E, 25km, 1Tg (within 5 degrees N/S/E/W)
+             if ( abs(state(c)%lat(icol) + 0.2617) < 0.0872 .and. abs(state(c)%lon(icol) - 3.66519) < 0.0872 ) then
+               writelev = 1 ! default write level
+               do ilev = 1,size(flds(f)%data,2)
+                 if (state(c)%zi(icol,ilev) > 25000.0) then
+                   writelev = ilev
+                   exit
+                 endif
+               enddo
+               flds(f)%data(icol,writelev,c) = injection_molecules(6)
+             endif
+           enddo
+         enddo
+         
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            field2d => flds(f)%data(:,:,c)
