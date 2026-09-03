@@ -2040,17 +2040,17 @@ contains
     real(r8) :: mol_weight = 64.066                   ! molecular weight of SO2
     real(r8) :: secperyear = 31536000.0               ! store as real to avoid implicit type conversions, number of seconds in a year
     real(r8) :: gpertg = 1.0e12                       ! store as real to avoid implicit type conversions, number of grams in teragram
-    real(r8) :: earth_radius = 6.37e6                 ! injection_amounts(i)*gpertg*avo/mol_weight/earth_radius/earth_radius/1e6/secperyear = write_integrals(i)
+    real(r8) :: earth_radius = 6.37e6                 ! radius of earth in meters, multiply r^2*area to get area in meters
     real(r8), allocatable :: write_integrals(:)       ! this is the volume of injection sites in meters*steradians
     real(r8), allocatable :: glb_write_integrals(:)   ! this is the MPI reduced volume of injection sites since they span multiple processors
     real(r8), allocatable :: cols_area(:)             ! this stores column areas that we need to fetch from other parts of E3SM
     real(r8), pointer :: field2d(:,:)                 ! field for cldera-tools tracking of this in case we need it
     real(r8) :: write_lats(6) = [-50.0, -30.0, -15.0, 15.0, 30.0, 50.0]    ! injection sites in degrees
     real(r8) :: write_lons(6) = [180.0, 180.0, 180.0, 180.0, 180.0, 180.0] ! injection sites in degrees
-    real(r8) :: d_latlon = 5.0                                             ! max deviation from injection site center in degrees (square of side length 2*5.0)
+    real(r8) :: d_latlon = 3.0                                             ! max deviation from injection site center in degrees (square of side length 2*5.0)
     real(r8) :: write_levs(6) = [17000.0, 23000.0, 25000.0, 25000.0, 23000.0, 17000.0] ! injection height in meters
     integer :: write_lev_inds(6) = [32, 21, 18, 18, 21, 32]                ! injection height index (if we skip the height calculation)
-    real(r8) :: injection_amounts(6) = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]      ! injection amount in Tg/yr at each site
+    real(r8) :: injection_amounts(6) = [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]      ! injection amount in Tg/yr at each site
     real(r8) :: injection_molecules(6) = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]    ! this is the computed injection in molecules/cm3/s
     real(r8), allocatable :: tmpfield2d(:,:)
 #endif
@@ -2227,7 +2227,7 @@ contains
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
          ! allocate dimensions and information related to the forcing dimensions
          nparts = endchunk - begchunk + 1
-         
+
          ! zero the field out and ignore input from original SAI file
          flds(f)%data(:,:,:) = 0.0_r8
 
@@ -2259,24 +2259,25 @@ contains
            c = begchunk+ipart-1 ! chunk number
            ! get all areas on this chunk
            call get_area_all_p(c,pcols,cols_area)
-           
+
            ! loop over columns
            do icol = 1,size(flds(f)%data,1)
              ! loop over injection sites
              do isite = 1,6
                ! check if our current column is within d_latlon of the injection site
-               if ( abs(state(c)%lat(icol)*180/3.14159 - write_lats(isite)) < d_latlon .and. abs(state(c)%lon(icol)*180/3.14159 - write_lats(isite)) < d_latlon ) then
+               if ( abs(state(c)%lat(icol)*180/3.14159 - write_lats(isite)) < d_latlon .and. abs(state(c)%lon(icol)*180/3.14159 - write_lons(isite)) < d_latlon ) then
                  ! write(*,*) 'GH FOUND INJECTION SITE ', isite, state(c)%lat(icol), state(c)%lon(icol)
-                 writelev = 1 ! default write level
+                 writelev = write_lev_inds(isite) ! default write level
                  do ilev = 1,size(flds(f)%data,2)
-                   if (state(c)%zi(icol,ilev) > write_levs(isite)) then
-                     write(*,*) 'GH INJECTION SITE 1 LEVEL ', ilev
+                   ! zi is descending; once we pass it, take the previous minus the current
+                   if (state(c)%zi(icol,ilev) < write_levs(isite)) then
                      writelev = ilev
                      exit
                    endif
                  enddo
-                 writelev = write_lev_inds(isite) ! MANUAL OVERRIDE
-                 write_integrals(isite) = write_integrals(isite) + cols_area(icol)*(state(c)%zi(i,writelev+1)-state(c)%zi(i,writelev))
+                 ! writelev = write_lev_inds(isite) ! MANUAL OVERRIDE
+                 write(*,*) 'GH INJECTION HEIGHT ZI ', writelev, state(c)%zi(icol,writelev-1), state(c)%zi(icol,writelev)
+                 write_integrals(isite) = write_integrals(isite) + cols_area(icol)*(state(c)%zi(icol,writelev-1)-state(c)%zi(icol,writelev))
                endif
              enddo
            enddo
@@ -2292,36 +2293,42 @@ contains
          ! TODO: wrap everything in loops (need arrays for injection site coords/heights)
          ! calculate the injections in molecules/cm3/sec by starting from Tg/yr
          do isite=1,6
-           injection_molecules(isite) = injection_amounts(isite)/glb_write_integrals(isite)*gpertg*avo/mol_weight/earth_radius/earth_radius/1.0e6/secperyear
+           injection_molecules(isite) = injection_amounts(isite)/secperyear * gpertg/mol_weight*avo / glb_write_integrals(isite)/earth_radius/earth_radius/1.0e6
          enddo
+
+         if (masterproc) then
+           do isite=1,6
+             write(*,*) 'GH MOLECULES ', isite, injection_molecules(isite)
+           enddo
+         endif
 
          ! PART 2: WRITE INJECTION AMOUNTS
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            call get_area_all_p(c,pcols,cols_area)
-           
+
            ! loop over columns
            do icol = 1,size(flds(f)%data,1)
              ! loop over injection sites
              do isite = 1,6
                ! check if our current column is within d_latlon of the injection site
-               if ( abs(state(c)%lat(icol)*180/3.14159 - write_lats(isite)) < d_latlon .and. abs(state(c)%lon(icol)*180/3.14159 - write_lats(isite)) < d_latlon ) then
+               if ( abs(state(c)%lat(icol)*180/3.14159 - write_lats(isite)) < d_latlon .and. abs(state(c)%lon(icol)*180/3.14159 - write_lons(isite)) < d_latlon ) then
                  ! write(*,*) 'GH FOUND INJECTION SITE ', isite, state(c)%lat(icol), state(c)%lon(icol)
-                 writelev = 1 ! default write level
+                 writelev = write_lev_inds(isite) ! default write level
                  do ilev = 1,size(flds(f)%data,2)
-                   if (state(c)%zi(icol,ilev) > write_levs(isite)) then
-                     write(*,*) 'GH INJECTION SITE 1 LEVEL ', ilev
+                   ! zi is descending; once we pass it, take the previous minus the current
+                   if (state(c)%zi(icol,ilev) < write_levs(isite)) then
                      writelev = ilev
                      exit
                    endif
                  enddo
-                 writelev = write_lev_inds(isite) ! MANUAL OVERRIDE
+                 ! write(*,*) 'GH INJECTION HEIGHT2 ZI ', writelev, state(c)%zi(icol,writelev-1), state(c)%zi(icol,writelev)
                  flds(f)%data(icol,writelev,c) = injection_molecules(isite) ! write the injection amount
                endif
              enddo
            enddo
          enddo
-         
+
          do ipart = 1,nparts
            c = begchunk+ipart-1 ! chunk number
            field2d => flds(f)%data(:,:,c)
