@@ -2047,7 +2047,7 @@ contains
     real(r8), pointer :: field2d(:,:)                 ! field for cldera-tools tracking of this in case we need it
     real(r8) :: write_lats(6) = [-50.0, -30.0, -15.0, 15.0, 30.0, 50.0]    ! injection sites in degrees
     real(r8) :: write_lons(6) = [180.0, 180.0, 180.0, 180.0, 180.0, 180.0] ! injection sites in degrees
-    real(r8) :: d_latlon = 3.0                                             ! max deviation from injection site center in degrees (square of side length 2*5.0)
+    real(r8) :: d_latlon = 15.0                                             ! max deviation from injection site center in degrees (square of side length 2*5.0)
     real(r8) :: write_levs(6) = [17000.0, 23000.0, 25000.0, 25000.0, 23000.0, 17000.0] ! injection height in meters
     integer :: write_lev_inds(6) = [32, 21, 18, 18, 21, 32]                ! injection height index (if we skip the height calculation)
     real(r8) :: injection_amounts(6) = [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]      ! injection amount in Tg/yr at each site
