@@ -2043,6 +2043,8 @@ contains
     real(r8) :: earth_radius = 6.37e6                 ! radius of earth in meters, multiply r^2*area to get area in meters
     real(r8), allocatable :: write_integrals(:)       ! this is the volume of injection sites in meters*steradians
     real(r8), allocatable :: glb_write_integrals(:)   ! this is the MPI reduced volume of injection sites since they span multiple processors
+    real(r8), allocatable :: written_tgyr(:)          ! local mass closure diagnostic in Tg/yr
+    real(r8), allocatable :: glb_written_tgyr(:)      ! global mass closure diagnostic in Tg/yr
     real(r8), allocatable :: cols_area(:)             ! this stores column areas that we need to fetch from other parts of E3SM
     real(r8), pointer :: field2d(:,:)                 ! field for cldera-tools tracking of this in case we need it
     real(r8) :: write_lats(6) = [-50.0, -30.0, -15.0, 15.0, 30.0, 50.0]    ! injection sites in degrees
@@ -2225,6 +2227,7 @@ contains
 #if defined(CLDERA_PROFILING)
        ! if we're working with the SAI field, then we make modifications
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
+
          ! allocate dimensions and information related to the forcing dimensions
          nparts = endchunk - begchunk + 1
 
@@ -2241,96 +2244,188 @@ contains
            allocate(write_integrals(6))
          endif
 
-         ! glb_write_integrals is the MPI reduction of the injection sites, needed to calibrate injection
+         ! glb_write_integrals is the MPI reduction of the injection-site volumes
          if (.not. allocated(glb_write_integrals)) then
            allocate(glb_write_integrals(6))
          endif
 
-         ! TODO: we should probably free things somewhere, but I don't think we have to worry about memory leaks
+         ! written_tgyr is a local mass-closure diagnostic
+         if (.not. allocated(written_tgyr)) then
+           allocate(written_tgyr(6))
+         endif
 
-         ! zero out integrals
-         write_integrals = 0.0_r8
+         ! glb_written_tgyr is the MPI-reduced mass-closure diagnostic
+         if (.not. allocated(glb_written_tgyr)) then
+           allocate(glb_written_tgyr(6))
+         endif
+
+         ! zero out integrals and diagnostics
+         write_integrals     = 0.0_r8
          glb_write_integrals = 0.0_r8
-         write_integrals = 0.0
+         written_tgyr        = 0.0_r8
+         glb_written_tgyr    = 0.0_r8
 
+         ! ------------------------------------------------------------------
          ! PART 1: COMPUTE INJECTION VOLUMES
-         ! loop over chunks
+         !
+         ! write_integrals has units of meters * steradians.
+         ! Multiplying by earth_radius^2 gives m3.
+         ! Multiplying by 1.0e6 gives cm3.
+         !
+         ! Important:
+         !   Loop over state(c)%ncol, not size(flds(f)%data,1), because
+         !   size(flds(f)%data,1) is pcols and includes padded columns.
+         ! ------------------------------------------------------------------
          do ipart = 1,nparts
-           c = begchunk+ipart-1 ! chunk number
-           ! get all areas on this chunk
-           call get_area_all_p(c,pcols,cols_area)
 
-           ! loop over columns
-           do icol = 1,size(flds(f)%data,1)
-             ! loop over injection sites
+           c = begchunk + ipart - 1
+
+           call get_area_all_p(c,pcols,cols_area)
+           ncol = state(c)%ncol
+
+           do icol = 1,ncol
              do isite = 1,6
-               ! check if our current column is within d_latlon of the injection site
-               if ( abs(state(c)%lat(icol)*180/3.14159 - write_lats(isite)) < d_latlon .and. abs(state(c)%lon(icol)*180/3.14159 - write_lons(isite)) < d_latlon ) then
-                 ! write(*,*) 'GH FOUND INJECTION SITE ', isite, state(c)%lat(icol), state(c)%lon(icol)
-                 writelev = write_lev_inds(isite) ! default write level
-                 do ilev = 1,size(flds(f)%data,2)
-                   ! zi is descending; once we pass it, take the previous minus the current
+
+               if ( abs(state(c)%lat(icol)*180.0_r8/3.14159_r8 - write_lats(isite)) < d_latlon .and. &
+                    abs(state(c)%lon(icol)*180.0_r8/3.14159_r8 - write_lons(isite)) < d_latlon ) then
+
+                 writelev = write_lev_inds(isite) ! default/fallback write level
+
+                 ! Find model level corresponding to requested injection height.
+                 ! zi is descending; once we pass the requested height, use
+                 ! the thickness between writelev-1 and writelev.
+                 do ilev = 2,size(flds(f)%data,2)
                    if (state(c)%zi(icol,ilev) < write_levs(isite)) then
                      writelev = ilev
                      exit
                    endif
                  enddo
-                 ! writelev = write_lev_inds(isite) ! MANUAL OVERRIDE
-                 write(*,*) 'GH INJECTION HEIGHT ZI ', writelev, state(c)%zi(icol,writelev-1), state(c)%zi(icol,writelev)
-                 write_integrals(isite) = write_integrals(isite) + cols_area(icol)*(state(c)%zi(icol,writelev-1)-state(c)%zi(icol,writelev))
+
+                 write_integrals(isite) = write_integrals(isite) + &
+                      cols_area(icol) * (state(c)%zi(icol,writelev-1) - state(c)%zi(icol,writelev))
+
                endif
+
              enddo
            enddo
+
          enddo
 
          call mpi_allreduce(write_integrals, glb_write_integrals, 6, mpi_real8, mpi_sum, mpicom, ierr)
+
          if (masterproc) then
-           do isite=1,6
+           do isite = 1,6
              write(*,*) 'GH INTEGRAL ', isite, glb_write_integrals(isite)
            enddo
          endif
 
-         ! TODO: wrap everything in loops (need arrays for injection site coords/heights)
-         ! calculate the injections in molecules/cm3/sec by starting from Tg/yr
-         do isite=1,6
-           injection_molecules(isite) = injection_amounts(isite)/secperyear * gpertg/mol_weight*avo / glb_write_integrals(isite)/earth_radius/earth_radius/1.0e6
+         ! ------------------------------------------------------------------
+         ! Convert desired injection amount from Tg/yr/site to molecules/cm3/s.
+         !
+         ! injection_amounts: Tg/yr
+         ! /secperyear:       Tg/s
+         ! *gpertg:           g/s
+         ! /mol_weight:       mol/s
+         ! *avo:              molecules/s
+         ! /glb_integral:     molecules/(m * sr * s)
+         ! /earth_radius^2:   molecules/(m3 * s)
+         ! /1.0e6:            molecules/(cm3 * s)
+         ! ------------------------------------------------------------------
+         do isite = 1,6
+
+           if (glb_write_integrals(isite) <= 0.0_r8) then
+             if (masterproc) then
+               write(*,*) 'GH WARNING: non-positive injection volume for site ', isite, &
+                          ' integral = ', glb_write_integrals(isite)
+             endif
+             injection_molecules(isite) = 0.0_r8
+           else
+             injection_molecules(isite) = injection_amounts(isite) / secperyear * &
+                  gpertg / mol_weight * avo / &
+                  glb_write_integrals(isite) / earth_radius / earth_radius / 1.0e6_r8
+           endif
+
          enddo
 
          if (masterproc) then
-           do isite=1,6
+           do isite = 1,6
              write(*,*) 'GH MOLECULES ', isite, injection_molecules(isite)
            enddo
          endif
 
+         ! ------------------------------------------------------------------
          ! PART 2: WRITE INJECTION AMOUNTS
-         do ipart = 1,nparts
-           c = begchunk+ipart-1 ! chunk number
-           call get_area_all_p(c,pcols,cols_area)
+         !
+         ! Important:
+         !   1. Loop over ncol, not pcols.
+         !   2. Use additive assignment. This avoids overwriting if two
+         !      injection masks overlap on a coarse grid.
+         !   3. Accumulate an internal mass-closure diagnostic using the exact
+         !      same cells and layer thicknesses used to write the source.
+         ! ------------------------------------------------------------------
+         written_tgyr = 0.0_r8
 
-           ! loop over columns
-           do icol = 1,size(flds(f)%data,1)
-             ! loop over injection sites
+         do ipart = 1,nparts
+
+           c = begchunk + ipart - 1
+
+           call get_area_all_p(c,pcols,cols_area)
+           ncol = state(c)%ncol
+
+           do icol = 1,ncol
              do isite = 1,6
-               ! check if our current column is within d_latlon of the injection site
-               if ( abs(state(c)%lat(icol)*180/3.14159 - write_lats(isite)) < d_latlon .and. abs(state(c)%lon(icol)*180/3.14159 - write_lons(isite)) < d_latlon ) then
-                 ! write(*,*) 'GH FOUND INJECTION SITE ', isite, state(c)%lat(icol), state(c)%lon(icol)
-                 writelev = write_lev_inds(isite) ! default write level
-                 do ilev = 1,size(flds(f)%data,2)
-                   ! zi is descending; once we pass it, take the previous minus the current
+
+               if ( abs(state(c)%lat(icol)*180.0_r8/3.14159_r8 - write_lats(isite)) < d_latlon .and. &
+                    abs(state(c)%lon(icol)*180.0_r8/3.14159_r8 - write_lons(isite)) < d_latlon ) then
+
+                 writelev = write_lev_inds(isite) ! default/fallback write level
+
+                 ! Find model level corresponding to requested injection height.
+                 do ilev = 2,size(flds(f)%data,2)
                    if (state(c)%zi(icol,ilev) < write_levs(isite)) then
                      writelev = ilev
                      exit
                    endif
                  enddo
-                 ! write(*,*) 'GH INJECTION HEIGHT2 ZI ', writelev, state(c)%zi(icol,writelev-1), state(c)%zi(icol,writelev)
-                 flds(f)%data(icol,writelev,c) = injection_molecules(isite) ! write the injection amount
+
+                 ! Write the injection amount.
+                 flds(f)%data(icol,writelev,c) = flds(f)%data(icol,writelev,c) + injection_molecules(isite)
+
+                 ! BMWGPT WRITTEN TG/YR mass-closure diagnostic.
+                 !
+                 ! This converts the amount just written back to Tg/yr:
+                 !
+                 ! molecules/cm3/s
+                 ! * layer_volume_cm3
+                 ! * sec/yr
+                 ! / avo
+                 ! * mol_weight
+                 ! / gpertg
+                 !
+                 written_tgyr(isite) = written_tgyr(isite) + &
+                      injection_molecules(isite) * &
+                      cols_area(icol) * &
+                      (state(c)%zi(icol,writelev-1) - state(c)%zi(icol,writelev)) * &
+                      earth_radius * earth_radius * 1.0e6_r8 * &
+                      secperyear / avo * mol_weight / gpertg
+
                endif
+
              enddo
            enddo
+
          enddo
 
+         call mpi_allreduce(written_tgyr, glb_written_tgyr, 6, mpi_real8, mpi_sum, mpicom, ierr)
+
+         if (masterproc) then
+           do isite = 1,6
+             write(*,*) 'BMWGPT WRITTEN TG/YR ', isite, glb_written_tgyr(isite)
+           enddo
+         endif
+
          do ipart = 1,nparts
-           c = begchunk+ipart-1 ! chunk number
+           c = begchunk + ipart - 1
            field2d => flds(f)%data(:,:,c)
            call cldera_set_field_part_data('forcing_sai',ipart,field2d)
          enddo

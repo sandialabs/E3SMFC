@@ -1,3 +1,6 @@
+# intel cmake files get overwritten by each user
+cime_config/machines/cmake_macros/intel_boca.cmake
+
 # Object files
 *.lo
 *.o
