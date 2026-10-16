@@ -2036,6 +2036,9 @@ contains
 
 #if defined(CLDERA_PROFILING)
     integer :: nparts, ipart, icol, ilev, writelev, ierr, isite
+    integer :: kstore                                 ! index into flds(f)%data for the injection layer (accounts for
+                                                      ! bottom-up storage when file%alt_data is true, see below)
+    real(r8) :: dz                                    ! thickness [m] of the model layer containing the injection height
     real(r8) :: avo = 6.022e23                        ! Avogadro's number
     real(r8) :: mol_weight = 64.066                   ! molecular weight of SO2
     real(r8) :: secperyear = 31536000.0               ! store as real to avoid implicit type conversions, number of seconds in a year
@@ -2051,7 +2054,9 @@ contains
     real(r8) :: write_lons(6) = [180.0, 180.0, 180.0, 180.0, 180.0, 180.0] ! injection sites in degrees
     real(r8) :: d_latlon = 15.0                                             ! max deviation from injection site center in degrees (square of side length 2*5.0)
     real(r8) :: write_levs(6) = [17000.0, 23000.0, 25000.0, 25000.0, 23000.0, 17000.0] ! injection height in meters
-    integer :: write_lev_inds(6) = [32, 21, 18, 18, 21, 32]                ! injection height index (if we skip the height calculation)
+    integer :: write_lev_inds(6) = [32, 21, 18, 18, 21, 32]                ! fallback injection LAYER index in model (top-down,
+                                                                            ! 1 = model top) convention, used only if the height
+                                                                            ! search below fails to bracket write_levs
     real(r8) :: injection_amounts(6) = [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]      ! injection amount in Tg/yr at each site
     real(r8) :: injection_molecules(6) = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]    ! this is the computed injection in molecules/cm3/s
     real(r8), allocatable :: tmpfield2d(:,:)
@@ -2289,20 +2294,34 @@ contains
                if ( abs(state(c)%lat(icol)*180.0_r8/3.14159_r8 - write_lats(isite)) < d_latlon .and. &
                     abs(state(c)%lon(icol)*180.0_r8/3.14159_r8 - write_lons(isite)) < d_latlon ) then
 
-                 writelev = write_lev_inds(isite) ! default/fallback write level
-
-                 ! Find model level corresponding to requested injection height.
-                 ! zi is descending; once we pass the requested height, use
-                 ! the thickness between writelev-1 and writelev.
-                 do ilev = 2,size(flds(f)%data,2)
+                 ! ----------------------------------------------------------
+                 ! Find the model LAYER containing the requested height.
+                 !
+                 ! Model convention (top-down): layer k is bounded above by
+                 ! interface zi(k) and below by interface zi(k+1), so zi
+                 ! decreases with increasing index. The first interface
+                 ! ilev with zi(ilev) < target lies just BELOW the target,
+                 ! so the layer containing the target is k = ilev - 1.
+                 !
+                 ! NOTE: previously the source was written to layer ilev
+                 ! (one layer too low) while the volume used the thickness
+                 ! of layer ilev-1, so the emitted mass was scaled by
+                 ! dz(ilev)/dz(ilev-1) and did not match the target.
+                 ! ----------------------------------------------------------
+                 writelev = write_lev_inds(isite) ! fallback layer (model top-down index)
+                 do ilev = 2,pverp
                    if (state(c)%zi(icol,ilev) < write_levs(isite)) then
-                     writelev = ilev
+                     writelev = ilev - 1
                      exit
                    endif
                  enddo
 
-                 write_integrals(isite) = write_integrals(isite) + &
-                      cols_area(icol) * (state(c)%zi(icol,writelev-1) - state(c)%zi(icol,writelev))
+                 ! Thickness [m] of the injection layer. This SAME dz must be
+                 ! used for the volume (here), and in PART 2 for the write and
+                 ! the mass-closure diagnostic, so that mass is conserved.
+                 dz = state(c)%zi(icol,writelev) - state(c)%zi(icol,writelev+1)
+
+                 write_integrals(isite) = write_integrals(isite) + cols_area(icol) * dz
 
                endif
 
@@ -2378,18 +2397,42 @@ contains
                if ( abs(state(c)%lat(icol)*180.0_r8/3.14159_r8 - write_lats(isite)) < d_latlon .and. &
                     abs(state(c)%lon(icol)*180.0_r8/3.14159_r8 - write_lons(isite)) < d_latlon ) then
 
-                 writelev = write_lev_inds(isite) ! default/fallback write level
-
-                 ! Find model level corresponding to requested injection height.
-                 do ilev = 2,size(flds(f)%data,2)
+                 ! Find the injection layer exactly as in PART 1 (must match).
+                 writelev = write_lev_inds(isite) ! fallback layer (model top-down index)
+                 do ilev = 2,pverp
                    if (state(c)%zi(icol,ilev) < write_levs(isite)) then
-                     writelev = ilev
+                     writelev = ilev - 1
                      exit
                    endif
                  enddo
 
-                 ! Write the injection amount.
-                 flds(f)%data(icol,writelev,c) = flds(f)%data(icol,writelev,c) + injection_molecules(isite)
+                 dz = state(c)%zi(icol,writelev) - state(c)%zi(icol,writelev+1)
+
+                 ! ----------------------------------------------------------
+                 ! Map the model (top-down) layer index to the storage index
+                 ! of flds(f)%data.
+                 !
+                 ! For files with an 'altitude' dimension (file%alt_data,
+                 ! e.g. CMIP6 elevated-emission files such as the SO2 file),
+                 ! rebin() above fills data_out from the SURFACE UPWARD
+                 ! (model_z = zi(pverp:1:-1)), i.e. index 1 = lowest layer.
+                 ! extfrc_set (mo_extfrc.F90) then flips it back with
+                 ! data(:ncol,pver:1:-1,lchnk). Writing at index writelev
+                 ! would therefore land at model layer pver+1-writelev (in the
+                 ! troposphere), and SO2_CLXF would integrate it with that
+                 ! layer's (different) thickness -> wrong mass and height.
+                 !
+                 ! For pressure-level files (alt_data false), data is already
+                 ! stored top-down and no flip is needed.
+                 ! ----------------------------------------------------------
+                 if (file%alt_data) then
+                   kstore = pver + 1 - writelev
+                 else
+                   kstore = writelev
+                 endif
+
+                 ! Write the injection amount (additive, see note 2 above).
+                 flds(f)%data(icol,kstore,c) = flds(f)%data(icol,kstore,c) + injection_molecules(isite)
 
                  ! BMWGPT WRITTEN TG/YR mass-closure diagnostic.
                  !
@@ -2402,10 +2445,13 @@ contains
                  ! * mol_weight
                  ! / gpertg
                  !
+                 ! Uses the same dz as PART 1 and as SO2_CLXF in extfrc_set
+                 ! (after the alt_data flip, model layer writelev), so this
+                 ! should now agree with the offline SO2_CLXF integral.
+                 !
                  written_tgyr(isite) = written_tgyr(isite) + &
                       injection_molecules(isite) * &
-                      cols_area(icol) * &
-                      (state(c)%zi(icol,writelev-1) - state(c)%zi(icol,writelev)) * &
+                      cols_area(icol) * dz * &
                       earth_radius * earth_radius * 1.0e6_r8 * &
                       secperyear / avo * mol_weight / gpertg
 
