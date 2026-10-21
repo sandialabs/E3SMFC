@@ -2007,7 +2007,8 @@ contains
                                     cldera_set_field_part_data, &
                                     cldera_commit_all_fields,   &
                                     cldera_commit_field
-    use phys_grid,       only: get_ncols_p, print_cost_p, update_cost_p, phys_proc_cost, get_area_all_p
+    use phys_grid,       only: get_ncols_p, print_cost_p, update_cost_p, phys_proc_cost, get_area_all_p, &
+                               ngcols_p   ! global number of physics columns, used to identify the grid
     use spmd_utils,      only: mpi_real8, mpicom, mpi_sum
 #endif
 
@@ -2052,7 +2053,15 @@ contains
     real(r8), pointer :: field2d(:,:)                 ! field for cldera-tools tracking of this in case we need it
     real(r8) :: write_lats(6) = [-50.0, -30.0, -15.0, 15.0, 30.0, 50.0]    ! injection sites in degrees
     real(r8) :: write_lons(6) = [180.0, 180.0, 180.0, 180.0, 180.0, 180.0] ! injection sites in degrees
-    real(r8) :: d_latlon = 15.0                                             ! max deviation from injection site center in degrees (square of side length 2*5.0)
+    real(r8) :: d_latlon                                                    ! max deviation from injection site center in degrees
+                                                                            ! (box of side 2*d_latlon); set below from the grid resolution
+    ! BMW: Grid-dependent box half-widths. The physics grid is identified by its global column count
+    ! ngcols_p = 6 * ne^2 * 4 for pg2 grids (6 cube faces, ne^2 elements/face, 2x2 FV cells/element).
+    integer,  parameter :: ngcols_ne4pg2  = 6*4*4*4                         ! = 384
+    integer,  parameter :: ngcols_ne30pg2 = 6*30*30*4                       ! = 21600
+    real(r8), parameter :: d_latlon_ne4pg2  = 15.0_r8                       ! ne4pg2 cells are ~7.5 deg; need a wide box to catch columns
+    real(r8), parameter :: d_latlon_ne30pg2 =  3.0_r8                       ! ne30pg2 cells are ~1 deg
+    logical, save       :: d_latlon_reported = .false.                      ! print the chosen d_latlon only once
     real(r8) :: write_levs(6) = [17000.0, 23000.0, 25000.0, 25000.0, 23000.0, 17000.0] ! injection height in meters
     integer :: write_lev_inds(6) = [32, 21, 18, 18, 21, 32]                ! fallback injection LAYER index in model (top-down,
                                                                             ! 1 = model top) convention, used only if the height
@@ -2269,6 +2278,33 @@ contains
          glb_write_integrals = 0.0_r8
          written_tgyr        = 0.0_r8
          glb_written_tgyr    = 0.0_r8
+
+         ! ------------------------------------------------------------------
+         ! PART 0 (BMW): CHOOSE THE INJECTION-BOX HALF-WIDTH FROM THE GRID
+         !
+         ! The site boxes must be wide enough to contain at least one column
+         ! on coarse grids, but narrow on fine grids so the injection stays
+         ! localized. Identify the grid from the global physics column count
+         ! (ngcols_p is identical on every MPI rank, so all ranks agree).
+         !
+         ! Any other grid aborts rather than silently using a default, so a
+         ! new resolution forces a deliberate choice of d_latlon here.
+         ! ------------------------------------------------------------------
+         select case (ngcols_p)
+         case (ngcols_ne4pg2)
+           d_latlon = d_latlon_ne4pg2
+         case (ngcols_ne30pg2)
+           d_latlon = d_latlon_ne30pg2
+         case default
+           write(iulog,*) 'interpolate_trcdata (SAI): unsupported physics grid, ngcols_p = ', ngcols_p
+           call endrun('interpolate_trcdata (SAI): no d_latlon defined for this grid; '// &
+                       'add a case for it in tracer_data.F90')
+         end select
+
+         if (masterproc .and. .not. d_latlon_reported) then
+           write(iulog,*) 'BMW SAI: ngcols_p = ', ngcols_p, ' -> d_latlon = ', d_latlon, ' deg'
+           d_latlon_reported = .true.
+         endif
 
          ! ------------------------------------------------------------------
          ! PART 1: COMPUTE INJECTION VOLUMES
