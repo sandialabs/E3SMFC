@@ -2059,7 +2059,12 @@ contains
     ! ngcols_p = 6 * ne^2 * 4 for pg2 grids (6 cube faces, ne^2 elements/face, 2x2 FV cells/element).
     integer,  parameter :: ngcols_ne4pg2  = 6*4*4*4                         ! = 384
     integer,  parameter :: ngcols_ne30pg2 = 6*30*30*4                       ! = 21600
-    real(r8), parameter :: d_latlon_ne4pg2  = 15.0_r8                       ! ne4pg2 cells are ~7.5 deg; need a wide box to catch columns
+    ! BMW: ne4pg2 physics cells are ~11 deg apart. 7 deg was chosen so each site's box holds exactly one
+    !      latitude row (2 columns straddling 180E), so the sites don't spill into neighboring latitude bands.
+    !      6 deg is too small: the +/-50 deg sites' nearest columns (lat +/-50.4, lon 173.2/186.8) are 6.8 deg
+    !      from 180E in longitude, so those boxes would be empty and inject nothing.
+    !      (Previously 15 deg, which put 3 latitude rows in each box.)
+    real(r8), parameter :: d_latlon_ne4pg2  =  7.0_r8
     real(r8), parameter :: d_latlon_ne30pg2 =  3.0_r8                       ! ne30pg2 cells are ~1 deg
     logical, save       :: d_latlon_reported = .false.                      ! print the chosen d_latlon only once
     real(r8) :: write_levs(6) = [17000.0, 23000.0, 25000.0, 25000.0, 23000.0, 17000.0] ! injection height in meters
