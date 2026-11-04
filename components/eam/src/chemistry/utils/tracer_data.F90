@@ -179,7 +179,11 @@ contains
                                     cldera_set_field_part_extent, &
                                     cldera_set_field_part_data, &
                                     cldera_commit_all_fields,   &
-                                    cldera_commit_field
+                                    cldera_commit_field, &
+                                    cldera_set_field_writable, &
+                                    cldera_set_field_part_data_writable_real_2d, &
+                                    cldera_set_sai_storage_bottom_up, &
+                                    cldera_has_sai_writer
     use phys_grid,       only: get_ncols_p, print_cost_p, update_cost_p, phys_proc_cost
 #endif
 
@@ -601,23 +605,58 @@ contains
        if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
          ! count number of chunks owned by this process
          nparts = endchunk - begchunk + 1
-         call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
-         ! for each chunk, set the extent
-         do ipart = 1,nparts
-           c = begchunk+ipart-1 ! chunk number
-           ncols = get_ncols_p(c)
-           call cldera_set_field_part_extent("forcing_sai", ipart,ncols)
-         enddo
 
-         call cldera_commit_field("forcing_sai")
+         if (cldera_has_sai_writer()) then
+           ! BMW: v2 (cldera-tools SAI writer). Register the EAM 'sai' array as a WRITABLE
+           !      VIEW: cldera-tools writes the controller's injection directly into
+           !      flds(f)%data at every cldera_compute_stats call (after tphysbc, before
+           !      chemistry/extfrc_set reads it). No copy, no Fortran injection code.
+           if (file%in_pbuf(f)) then
+             call endrun('trcdata_init: SAI writer requires the sai field NOT to live in pbuf')
+           endif
+           call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.true.)
+           call cldera_set_field_writable("forcing_sai")
+           do ipart = 1,nparts
+             c = begchunk+ipart-1 ! chunk number
+             ncols = get_ncols_p(c)
+             call cldera_set_field_part_extent("forcing_sai", ipart,ncols)
+             ! flds(f)%data is persistent (allocated above, module memory), so the
+             ! pointer stays valid for the whole run. Pass through a pointer (like the
+             ! other cldera registrations) so c_loc gets the address of the EAM memory
+             ! itself, never of a compiler temporary.
+             field2d => flds(f)%data(:,:,c)
+             call cldera_set_field_part_data_writable_real_2d("forcing_sai",ipart,field2d)
+           enddo
+           call cldera_commit_field("forcing_sai")
 
-         ! for each chunk, set the data
-         do ipart = 1,nparts
-           c = begchunk+ipart-1 ! chunk number
-           field2d => flds(f)%data(:,:,c)
-           ncols = get_ncols_p(c)
-           call cldera_set_field_part_data("forcing_sai",ipart,field2d)
-         enddo
+           ! BMW: tell cldera how this array is stored vertically. For files with an
+           !      'altitude' dimension (alt_data), interpolate_trcdata stores data
+           !      bottom-up and extfrc_set flips it with data(:,pver:1:-1,:).
+           call cldera_set_sai_storage_bottom_up(file%alt_data)
+           if (masterproc) then
+             write(iulog,*) 'BMW SAI: forcing_sai registered as writable view for cldera SAI writer; alt_data = ', &
+                            file%alt_data
+           endif
+         else
+           ! Legacy (pre-v2): copy of the field, for diagnostics only
+           call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+           ! for each chunk, set the extent
+           do ipart = 1,nparts
+             c = begchunk+ipart-1 ! chunk number
+             ncols = get_ncols_p(c)
+             call cldera_set_field_part_extent("forcing_sai", ipart,ncols)
+           enddo
+
+           call cldera_commit_field("forcing_sai")
+
+           ! for each chunk, set the data
+           do ipart = 1,nparts
+             c = begchunk+ipart-1 ! chunk number
+             field2d => flds(f)%data(:,:,c)
+             ncols = get_ncols_p(c)
+             call cldera_set_field_part_data("forcing_sai",ipart,field2d)
+           enddo
+         endif
        endif
 #endif
 
@@ -2006,7 +2045,8 @@ contains
                                     cldera_set_field_part_extent, &
                                     cldera_set_field_part_data, &
                                     cldera_commit_all_fields,   &
-                                    cldera_commit_field
+                                    cldera_commit_field, &
+                                    cldera_has_sai_writer
     use phys_grid,       only: get_ncols_p, print_cost_p, update_cost_p, phys_proc_cost, get_area_all_p, &
                                ngcols_p   ! global number of physics columns, used to identify the grid
     use spmd_utils,      only: mpi_real8, mpicom, mpi_sum
@@ -2245,7 +2285,13 @@ contains
 
 #if defined(CLDERA_PROFILING)
        ! if we're working with the SAI field, then we make modifications
-       if ( trim(flds(f)%srcnam) .eq. 'sai' ) then
+       !
+       ! BMW v2: if the cldera yaml requests the SAI writer, cldera-tools writes the
+       !         injection itself (into this same array, registered as a writable view in
+       !         trcdata_init), at every cldera_compute_stats call. In that case this whole
+       !         legacy Fortran injection block is skipped. It is kept, unchanged, as the
+       !         fallback (and as a reference to validate the C++ writer against).
+       if ( trim(flds(f)%srcnam) .eq. 'sai' .and. .not. cldera_has_sai_writer() ) then
 
          ! allocate dimensions and information related to the forcing dimensions
          nparts = endchunk - begchunk + 1
