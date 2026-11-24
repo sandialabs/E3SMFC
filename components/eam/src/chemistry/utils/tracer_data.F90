@@ -183,7 +183,8 @@ contains
                                     cldera_set_field_writable, &
                                     cldera_set_field_part_data_writable_real_2d, &
                                     cldera_set_sai_storage_bottom_up, &
-                                    cldera_has_sai_writer
+                                    cldera_has_sai_writer, &
+                                    cldera_set_field_metadata
     use phys_grid,       only: get_ncols_p, print_cost_p, update_cost_p, phys_proc_cost
 #endif
 
@@ -616,6 +617,8 @@ contains
            endif
            call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.true.)
            call cldera_set_field_writable("forcing_sai")
+           call cldera_set_field_metadata("forcing_sai", units=trim(flds(f)%units), &
+                                          long_name="SAI SO2 external forcing")
            do ipart = 1,nparts
              c = begchunk+ipart-1 ! chunk number
              ncols = get_ncols_p(c)
@@ -640,6 +643,8 @@ contains
          else
            ! Legacy (pre-v2): copy of the field, for diagnostics only
            call cldera_add_partitioned_field("forcing_sai",2,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
+           call cldera_set_field_metadata("forcing_sai", units=trim(flds(f)%units), &
+                                          long_name="SAI SO2 external forcing")
            ! for each chunk, set the extent
            do ipart = 1,nparts
              c = begchunk+ipart-1 ! chunk number

@@ -313,6 +313,7 @@ module cam_history
   public :: hist_fld_active           ! Determine if a field is active on any history file
   public :: hist_fld_col_active       ! Determine if a field is active on any history file at
   ! each column in a chunk
+  public :: hist_fld_get_info         ! Return units/long_name of a field in the master list
 
 CONTAINS
 
@@ -5705,6 +5706,48 @@ end subroutine print_active_fldlst
     end if
 
   end function hist_fld_active
+
+  !#######################################################################
+
+  subroutine hist_fld_get_info(fname, units, long_name, found)
+    !
+    !------------------------------------------------------------------------
+    !
+    ! Purpose: return the units and long name of a field in the history
+    !          master field list (as set by addfld).
+    !          If the field is not found, found=.false. and units/long_name
+    !          are set to blank. Unlike get_masterlist_indx, this does NOT
+    !          abort if the field is missing, so it can be used to probe names.
+    !
+    !------------------------------------------------------------------------
+    !
+    character(len=*), intent(in)  :: fname      ! Field name
+    character(len=*), intent(out) :: units      ! Field units
+    character(len=*), intent(out) :: long_name  ! Field long name
+    logical,          intent(out) :: found
+    !
+    ! Local variables
+    !
+    type(master_entry), pointer :: entry
+    !-----------------------------------------------------------------------
+
+    units = ' '
+    long_name = ' '
+    found = .false.
+
+    ! Iterative walk of the master linked list (avoid deep recursion)
+    entry => masterlinkedlist
+    do while (associated(entry))
+      if (trim(entry%field%name) == trim(fname)) then
+        found = .true.
+        units     = entry%field%units
+        long_name = entry%field%long_name
+        exit
+      end if
+      entry => entry%next_entry
+    end do
+
+  end subroutine hist_fld_get_info
 
   !#######################################################################
 

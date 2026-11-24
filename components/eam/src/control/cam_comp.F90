@@ -106,14 +106,15 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
                                    cldera_set_field_part_extent, &
                                    cldera_set_field_part_data, &
                                    cldera_commit_all_fields,   &
-                                   cldera_commit_field
+                                   cldera_commit_field, &
+                                   cldera_set_field_metadata
    use physics_buffer,   only: physics_buffer_desc, col_type_grid, pbuf_get_index, &
                                pbuf_get_field_rank, pbuf_get_field_dims, pbuf_get_field, &
                                pbuf_get_field_name, pbuf_has_field, pbuf_get_field_persistence, &
                                persistence_global
    use ppgrid,           only: begchunk, endchunk, pcols, pver
    use phys_grid,        only: get_ncols_p, get_gcol_all_p, get_area_all_p
-   use constituents,     only: pcnst, cnst_name
+   use constituents,     only: pcnst, cnst_name, cnst_longname
 #endif
 
 #if ( defined SPMD )   
@@ -154,6 +155,18 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    type(physics_buffer_desc), pointer :: field_desc
    character(len=5) :: int_str
    character(len=4) :: diag(0:3) = (/'    ','_d1 ','_d2 ','_d3 '/)
+   ! Fields registered above whose name matches a history (addfld) field.
+   ! Their units/long_name are taken from the history master list.
+   character(len=16), parameter :: cldera_hist_names(13) = (/ character(len=16) :: &
+        'AEROD_v', 'AODALL', 'AODVIS', 'AODABS', 'AODSO4', 'BURDENSO4', &
+        'Mass_so4', 'TREFHT', 'QREFHT', 'TS', 'QFLX', 'SHFLX', 'LHFLX' /)
+   ! Same, for radiation fields registered for each diag(icall) suffix
+   character(len=16), parameter :: cldera_rad_names(36) = (/ character(len=16) :: &
+        'SOLIN', 'FSDS', 'FSNIRTOA', 'FSNRTOAC', 'FSNRTOAS', 'FSNT', 'FSNS', 'FSNTC', &
+        'FSNSC', 'FSDSC', 'FSNTOA', 'FSUTOA', 'FSNTOAC', 'FSUTOAC', 'SOLS', 'SOLL', &
+        'SOLSD', 'SOLLD', 'FSN200', 'FSN200C', 'SWCF', 'FLNT', 'FLUT', 'FLUTC', &
+        'FLNTC', 'FLNS', 'FLDSC', 'FLNSC', 'LWCF', 'FLN200', 'FLN200C', 'FLDS', &
+        'QRS', 'QRSC', 'QRL', 'QRLC' /)
 #endif
    !-----------------------------------------------------------------------
    etamid = nan
@@ -350,7 +363,6 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
    call cldera_add_partitioned_field("AEROD_v", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    ! modal_aer_opt
    call cldera_add_partitioned_field("AODALL", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
-   call cldera_add_partitioned_field("ABSORB", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    call cldera_add_partitioned_field("AODVIS", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    call cldera_add_partitioned_field("AODABS", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
    call cldera_add_partitioned_field("AODSO4", 1,dims,dimnames,nparts,part_dim,part_alloc_size,.false.)
@@ -559,7 +571,6 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
      call cldera_set_field_part_extent("AEROD_v", ipart,ncols)
      ! modal_aer_opt
      call cldera_set_field_part_extent("AODALL", ipart,ncols)
-     call cldera_set_field_part_extent("ABSORB", ipart,ncols)
      call cldera_set_field_part_extent("AODVIS", ipart,ncols)
      call cldera_set_field_part_extent("AODABS", ipart,ncols)
      call cldera_set_field_part_extent("AODSO4", ipart,ncols)
@@ -605,6 +616,55 @@ subroutine cam_init( cam_out, cam_in, mpicom_atm, &
      end do
      call cldera_set_field_part_extent("Mass_so4", ipart,ncols)
      ! call cldera_set_field_part_extent("forcing_sai", ipart,ncols) ! cannot be here because tracer init happens first
+   enddo
+
+   ! Field metadata (units/long_name). These are written as NetCDF attributes
+   ! in the cldera stats files, and inherited by the stats computed from each
+   ! field. Must be set BEFORE cldera_commit_all_fields (which creates the stats).
+   ! NOTE: pbuf fields are left without metadata: pbuf names may coincide with
+   !       history field names that have different units (e.g. QRS).
+
+   ! Geometry. NOTE: phys_state lat/lon are in radians, and the area returned
+   !       by get_area_all_p is in steradians.
+   call cldera_set_field_metadata("lat",  units="radians",   long_name="latitude")
+   call cldera_set_field_metadata("lon",  units="radians",   long_name="longitude")
+   call cldera_set_field_metadata("area", units="steradian", long_name="grid cell area")
+
+   ! phys_state fields
+   call cldera_set_field_metadata("ps",       units="Pa",     long_name="surface pressure")
+   call cldera_set_field_metadata("psdry",    units="Pa",     long_name="dry surface pressure")
+   call cldera_set_field_metadata("phis",     units="m2/s2",  long_name="surface geopotential")
+   call cldera_set_field_metadata("T",        units="K",      long_name="temperature")
+   call cldera_set_field_metadata("u",        units="m/s",    long_name="zonal wind")
+   call cldera_set_field_metadata("v",        units="m/s",    long_name="meridional wind")
+   call cldera_set_field_metadata("s",        units="J/kg",   long_name="dry static energy")
+   call cldera_set_field_metadata("omega",    units="Pa/s",   long_name="vertical pressure velocity")
+   call cldera_set_field_metadata("pmid",     units="Pa",     long_name="midpoint pressure")
+   call cldera_set_field_metadata("pmid_dry", units="Pa",     long_name="dry midpoint pressure")
+   call cldera_set_field_metadata("pdel",     units="Pa",     long_name="layer thickness (pressure)")
+   call cldera_set_field_metadata("pdel_dry", units="Pa",     long_name="dry layer thickness (pressure)")
+   call cldera_set_field_metadata("exner",    units="1",      long_name="inverse exner function w.r.t. surface pressure")
+   call cldera_set_field_metadata("zm",       units="m",      long_name="geopotential height above surface at midpoints")
+   call cldera_set_field_metadata("pint",     units="Pa",     long_name="interface pressure")
+   call cldera_set_field_metadata("pint_dry", units="Pa",     long_name="dry interface pressure")
+   call cldera_set_field_metadata("zi",       units="m",      long_name="geopotential height above surface at interfaces")
+   call cldera_set_field_metadata("dz",       units="m",      long_name="layer thickness (height), computed from zi")
+   call cldera_set_field_metadata("te",       units="J/m2",   long_name="vertically integrated total energy")
+   call cldera_set_field_metadata("tw",       units="kg/m2",  long_name="vertically integrated total water")
+
+   ! Constituents (mixing ratios)
+   do idx=1,pcnst
+     call cldera_set_field_metadata(cnst_name(idx), units="kg/kg", long_name=trim(cnst_longname(idx)))
+   enddo
+
+   ! Fields that are also history fields with the same name: use addfld's metadata
+   do idx=1,size(cldera_hist_names)
+     call cldera_meta_from_hist(trim(cldera_hist_names(idx)))
+   enddo
+   do icall = 1,0,-1
+     do idx=1,size(cldera_rad_names)
+       call cldera_meta_from_hist(trim(cldera_rad_names(idx))//trim(diag(icall)))
+     enddo
    enddo
 
    call cldera_commit_all_fields()
@@ -990,6 +1050,35 @@ subroutine cam_final( cam_out, cam_in )
 #endif
 
 end subroutine cam_final
+
+#if defined(CLDERA_PROFILING)
+!
+!-----------------------------------------------------------------------
+!
+subroutine cldera_meta_from_hist(fname)
+   !
+   ! Set the cldera metadata (units/long_name) of field fname from the
+   ! history master field list (addfld). Does nothing if fname is not a
+   ! history field.
+   !
+   use cam_history,          only: hist_fld_get_info
+   use cam_history_support,  only: max_chars
+   use cldera_interface_mod, only: cldera_set_field_metadata
+
+   character(len=*), intent(in) :: fname
+
+   character(len=max_chars) :: units, long_name
+   logical :: found
+
+   call hist_fld_get_info(fname, units, long_name, found)
+   if (found) then
+      call cldera_set_field_metadata(fname, units=trim(units), long_name=trim(long_name))
+   else if (masterproc) then
+      write(iulog,*) 'cldera_meta_from_hist: no history field named ', trim(fname), &
+                     '; leaving its cldera metadata unset'
+   end if
+end subroutine cldera_meta_from_hist
+#endif
 
 !
 !-----------------------------------------------------------------------

@@ -1363,12 +1363,17 @@ subroutine modal_aero_sw(list_idx, dt, state, pbuf, nnite, idxnite, is_cmip6_vol
 #endif
 
 #if defined(CLDERA_PROFILING)
-      !call cldera_set_field_part_data("ABSORB" ,lchnk-begchunk+1,absorb)
-      !call cldera_set_field_part_data("AODVIS" ,lchnk-begchunk+1,aodvis)
-      !call cldera_set_field_part_data("AODALL" ,lchnk-begchunk+1,aodall)
-      !call cldera_set_field_part_data("AODABS" ,lchnk-begchunk+1,aodabs)
-      !call cldera_set_field_part_data("AODSO4" ,lchnk-begchunk+1,so4aod)
-      !call cldera_set_field_part_data("BURDENSO4" ,lchnk-begchunk+1,burdenso4)
+      ! Climate list only (we are inside list_idx == 0). NOTE: aodvis, aodabs and
+      ! so4aod hold fillvalue (1e36) in night columns (set above, as for history
+      ! output), so reduce them with bounded stats (e.g. bounded_masked_integral
+      ! with valid_bounds) to get sunlit-column means. aodall and burdenso4 are
+      ! not night-filled. ABSORB (pcols,pver) is intentionally not copied: use
+      ! AODABS, its column integral.
+      call cldera_set_field_part_data("AODVIS" ,lchnk-begchunk+1,aodvis)
+      call cldera_set_field_part_data("AODALL" ,lchnk-begchunk+1,aodall)
+      call cldera_set_field_part_data("AODABS" ,lchnk-begchunk+1,aodabs)
+      call cldera_set_field_part_data("AODSO4" ,lchnk-begchunk+1,so4aod)
+      call cldera_set_field_part_data("BURDENSO4" ,lchnk-begchunk+1,burdenso4)
 #endif
 
    end if
